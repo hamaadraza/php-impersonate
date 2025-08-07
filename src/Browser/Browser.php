@@ -41,12 +41,11 @@ class Browser implements BrowserInterface
      */
     private function resolveExecutablePath(): void
     {
-        $rootPath = getcwd();
         $paths = [
             // Package bin directory
-            "$rootPath/bin/curl_{$this->name}",
+            realpath(__DIR__."/../../bin") . "/curl_{$this->name}",
             // Vendor bin directory
-            "$rootPath/vendor/bin/curl_{$this->name}",
+            realpath(__DIR__ . "/../../../../bin") . "/curl_{$this->name}",
             // Absolute system path
             "/usr/local/bin/curl_{$this->name}",
             // Check if it's in PATH

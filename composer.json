@@ -1,6 +1,6 @@
 {
     "name": "hamaadraza/php-impersonate",
-    "version": "1.0.0",
+    "version": "1.0.3",
     "description": "A PHP library for making HTTP requests with browser impersonation",
     "keywords": [
         "hamaadraza",

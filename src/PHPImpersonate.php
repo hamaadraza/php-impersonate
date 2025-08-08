@@ -538,7 +538,7 @@ class PHPImpersonate implements ClientInterface
 
         $lastLine = end($output);
 
-        if ($exitCode !== 0) {
+        if ($exitCode !== 0 && $status['exitcode'] !== 0) {
             // For HEAD requests specifically, we'll be more lenient
             if (strpos($command, '-X HEAD') !== false &&
                 is_numeric($lastLine) &&

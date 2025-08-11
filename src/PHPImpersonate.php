@@ -58,7 +58,7 @@ class PHPImpersonate implements ClientInterface
         $tempFiles = $this->createTempFiles();
 
         try {
-            $command = $this->buildCommand(
+            $commandResult = $this->buildCommand(
                 $request->getMethod(),
                 $request->getUrl(),
                 $tempFiles['body'],
@@ -66,6 +66,9 @@ class PHPImpersonate implements ClientInterface
                 $request->getHeaders(),
                 $request->getBody()
             );
+
+            $command = $commandResult['command'];
+            $additionalTempFiles = $commandResult['tempFiles'];
 
             $result = $this->runCommand($command);
 
@@ -80,6 +83,12 @@ class PHPImpersonate implements ClientInterface
 
         } finally {
             $this->cleanupTempFiles($tempFiles);
+            // Clean up additional temporary files (body data files)
+            if (isset($additionalTempFiles)) {
+                foreach ($additionalTempFiles as $tempFile) {
+                    $this->deleteTempFile($tempFile);
+                }
+            }
         }
     }
 
@@ -430,21 +439,29 @@ class PHPImpersonate implements ClientInterface
         string $headerFile,
         array $headers = [],
         ?string $body = null
-    ): string {
+    ): array {
         $browserCmd = $this->browser->getExecutablePath();
 
         $options = $this->buildCurlOptions($method, $outputFile, $headerFile, $headers);
+        $additionalTempFiles = [];
 
         if ($body !== null) {
-            $this->addBodyToOptions($options, $body, $headers);
+            $additionalTempFiles = $this->addBodyToOptions($options, $body, $headers);
         }
 
         // Add custom curl options (validated ones only)
         $options = array_merge($options, $this->curlOptions);
 
         try {
-            return CommandBuilder::buildCurlCommand($browserCmd, [$url], $options);
+            $command = CommandBuilder::buildCurlCommand($browserCmd, [$url], $options);
+
+            return ['command' => $command, 'tempFiles' => $additionalTempFiles];
         } catch (\Exception $e) {
+            // Clean up any temporary files that were created
+            foreach ($additionalTempFiles as $tempFile) {
+                $this->deleteTempFile($tempFile);
+            }
+
             throw new RequestException('Failed to build curl command: ' . $e->getMessage(), 0, $e);
         }
     }
@@ -468,6 +485,10 @@ class PHPImpersonate implements ClientInterface
             'X' => $method, // HTTP method
         ];
 
+        if (PlatformDetector::isWindows()) {
+            $options['ca-native'] = true;
+        }
+
         // Add headers
         if (! empty($headers)) {
             foreach ($headers as $name => $value) {
@@ -481,24 +502,28 @@ class PHPImpersonate implements ClientInterface
     /**
      * Add request body to curl options
      */
-    private function addBodyToOptions(array &$options, string $body, array $headers): void
+    private function addBodyToOptions(array &$options, string $body, array $headers): array
     {
         $contentType = $headers['Content-Type'] ?? '';
         $isJson = str_contains($contentType, 'application/json');
 
+        // Always use temporary files for large data to avoid command line length limits
+        // This prevents escapeshellarg() from failing on Windows with large arguments
+        $bodyFile = $this->createTempFile('curl_body_data');
+
+        if (file_put_contents($bodyFile, $body) === false) {
+            throw new RequestException('Failed to write request body to temporary file');
+        }
+
         if ($isJson) {
             // Use data-binary for JSON to preserve formatting
-            $bodyFile = $this->createTempFile('curl_body_data');
-
-            if (file_put_contents($bodyFile, $body) === false) {
-                throw new RequestException('Failed to write request body to temporary file');
-            }
-
             $options['data-binary'] = "@$bodyFile";
         } else {
-            // Use data for form data
-            $options['data'] = $body;
+            // Use data for form data, but with file reference to avoid command line limits
+            $options['data'] = "@$bodyFile";
         }
+
+        return [$bodyFile];
     }
 
     /**

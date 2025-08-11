@@ -246,13 +246,45 @@ class CommandBuilder
     private static function escapeValue($value): string
     {
         $stringValue = (string)$value;
-        $escaped = escapeshellarg($stringValue);
-
-        if ($escaped === false) {
-            throw new RuntimeException('Failed to escape argument value');
+        if (strlen($stringValue) > 8191) {
+            throw new RuntimeException('Argument too long: ' . $stringValue);
         }
 
-        return $escaped;
+        $platform = PlatformDetector::getPlatform();
+
+        if ($platform === PlatformDetector::PLATFORM_WINDOWS) {
+            return self::escapeWindowsValue($stringValue);
+        }
+
+        return self::escapeUnixValue($stringValue);
+    }
+
+    /**
+     * Escape value for Windows platform
+     *
+     * @param string $value
+     * @return string
+     */
+    private static function escapeWindowsValue(string $value): string
+    {
+        // On Windows, use double quotes and escape internal quotes
+        $value = str_replace('"', '\\"', $value);
+
+        return '"' . $value . '"';
+    }
+
+    /**
+     * Escape value for Unix platform (Linux/macOS)
+     *
+     * @param string $value
+     * @return string
+     */
+    private static function escapeUnixValue(string $value): string
+    {
+        // On Unix, use single quotes and escape internal single quotes
+        $value = str_replace("'", "'\"'\"'", $value);
+
+        return "'" . $value . "'";
     }
 
     /**

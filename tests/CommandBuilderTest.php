@@ -35,8 +35,15 @@ class CommandBuilderTest extends TestCase
         $this->assertStringContainsString('--verbose', $cmd);
         $this->assertStringContainsString('--output', $cmd);
         $this->assertStringContainsString('--config', $cmd);
-        $this->assertStringContainsString("'arg1'", $cmd);
-        $this->assertStringContainsString("'arg2'", $cmd);
+
+        // Platform-specific quote checking
+        if (PlatformDetector::isWindows()) {
+            $this->assertStringContainsString('"arg1"', $cmd);
+            $this->assertStringContainsString('"arg2"', $cmd);
+        } else {
+            $this->assertStringContainsString("'arg1'", $cmd);
+            $this->assertStringContainsString("'arg2'", $cmd);
+        }
     }
 
     /**
@@ -59,7 +66,13 @@ class CommandBuilderTest extends TestCase
         $this->assertStringContainsString('--max-time', $cmd); // long option
         $this->assertStringContainsString(' -H', $cmd); // header option (single letter)
         $this->assertStringContainsString('--data', $cmd); // data option (long option)
-        $this->assertStringContainsString("'https://example.com'", $cmd);
+
+        // Platform-specific quote checking
+        if (PlatformDetector::isWindows()) {
+            $this->assertStringContainsString('"https://example.com"', $cmd);
+        } else {
+            $this->assertStringContainsString("'https://example.com'", $cmd);
+        }
     }
 
     /**
@@ -78,11 +91,20 @@ class CommandBuilderTest extends TestCase
         $this->assertStringContainsString(' -s', $cmd);
         $this->assertStringContainsString('--verbose', $cmd);
         $this->assertStringContainsString(' -w', $cmd);
-        $this->assertStringContainsString("'%{http_code}'", $cmd);
+
+        // Platform-specific quote checking
+        if (PlatformDetector::isWindows()) {
+            $this->assertStringContainsString('"%{http_code}"', $cmd);
+            $this->assertStringContainsString('"30"', $cmd);
+            $this->assertStringContainsString('"TestAgent/1.0"', $cmd);
+        } else {
+            $this->assertStringContainsString("'%{http_code}'", $cmd);
+            $this->assertStringContainsString("'30'", $cmd);
+            $this->assertStringContainsString("'TestAgent/1.0'", $cmd);
+        }
+
         $this->assertStringContainsString('--max-time', $cmd);
-        $this->assertStringContainsString("'30'", $cmd);
         $this->assertStringContainsString('--user-agent', $cmd);
-        $this->assertStringContainsString("'TestAgent/1.0'", $cmd);
     }
 
     /**
@@ -352,7 +374,13 @@ class CommandBuilderTest extends TestCase
 
         // Verify structure
         $this->assertStringStartsWith('curl-impersonate-chrome', trim($cmd));
-        $this->assertStringEndsWith("'https://api.github.com/user'", trim($cmd));
+
+        // Platform-specific URL ending check
+        if (PlatformDetector::isWindows()) {
+            $this->assertStringEndsWith('"https://api.github.com/user"', trim($cmd));
+        } else {
+            $this->assertStringEndsWith("'https://api.github.com/user'", trim($cmd));
+        }
 
         // Verify options are present
         $this->assertStringContainsString(' -s', $cmd);
@@ -370,7 +398,13 @@ class CommandBuilderTest extends TestCase
 
         // Verify data
         $this->assertStringContainsString('--data', $cmd);
-        $this->assertStringContainsString('{"query":"user data"}', $cmd);
+
+        // Platform-specific JSON data checking
+        if (PlatformDetector::isWindows()) {
+            $this->assertStringContainsString('"{\\"query\\":\\"user data\\"}"', $cmd);
+        } else {
+            $this->assertStringContainsString('{"query":"user data"}', $cmd);
+        }
     }
 
     /**

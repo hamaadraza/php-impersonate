@@ -27,6 +27,16 @@ class PlatformDetector
         return self::PLATFORM_LINUX;
     }
 
+    public static function isWindows(): bool
+    {
+        return self::getPlatform() === self::PLATFORM_WINDOWS;
+    }
+
+    public static function isLinux(): bool
+    {
+        return self::getPlatform() === self::PLATFORM_LINUX;
+    }
+
     /**
      * Check if the current platform is supported
      */

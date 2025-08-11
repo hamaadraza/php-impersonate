@@ -281,10 +281,14 @@ class CommandBuilder
      */
     private static function escapeUnixValue(string $value): string
     {
-        // On Unix, use single quotes and escape internal single quotes
-        $value = str_replace("'", "'\"'\"'", $value);
+        // Use PHP's built-in escapeshellarg for Unix platforms
+        $escaped = escapeshellarg($value);
 
-        return "'" . $value . "'";
+        if ($escaped === false) {
+            throw new RuntimeException('Failed to escape Unix value');
+        }
+
+        return $escaped;
     }
 
     /**

@@ -6,7 +6,12 @@ A PHP library for making HTTP requests with browser impersonation. This library 
 
 ## Platform Requirements
 
-**IMPORTANT**: This package only works on Linux platforms. Windows and macOS are not supported due to the reliance on Linux-specific binary dependencies.
+**IMPORTANT**: This package works on Linux and Windows platforms. macOS support is planned for future releases.
+
+### Supported Platforms:
+- **Linux**: Full support with native binaries
+- **Windows**: Full support with Windows binaries (.bat files)
+- **macOS**: Not yet supported (planned for future releases)
 
 ## Installation
 
@@ -19,7 +24,7 @@ composer require hamaadraza/php-impersonate
 ## System Requirements
 
 - PHP 8.0 or higher
-- Linux operating system
+- Linux or Windows operating system
 
 ## Basic Usage
 
@@ -136,17 +141,29 @@ PHP-Impersonate supports mimicking various browsers:
 - `chrome107`
 - `chrome110`
 - `chrome116`
+- `chrome119`
+- `chrome120`
+- `chrome123`
+- `chrome124`
+- `chrome131`
+- `chrome131_android`
+- `chrome133a`
+- `chrome136`
 - `edge99`
 - `edge101`
-- `ff91esr`
-- `ff95`
-- `ff98`
-- `ff100`
-- `ff102`
-- `ff109`
-- `ff117`
-- `safari15_3`
-- `safari15_5`
+- `firefox133`
+- `firefox135`
+- `safari153`
+- `safari155`
+- `safari170`
+- `safari172_ios`
+- `safari180`
+- `safari180_ios`
+- `safari184`
+- `safari184_ios`
+- `safari260`
+- `safari260_ios`
+- `tor145`
 
 Example:
 ```php
@@ -204,18 +221,6 @@ try {
 }
 ```
 
-## Testing
-
-Run the test suite:
-
-```bash
-composer test
-```
-
-## License
-
-This project is licensed under the MIT License - see the LICENSE file for details.
-
 ## Data Formats for POST, PUT and PATCH Requests
 
 PHP-Impersonate supports sending data in different formats:
@@ -256,4 +261,16 @@ $response = PHPImpersonate::post('https://example.com/api',
 );
 ```
 
+## Testing
+
+Run the test suite:
+
+```bash
+composer test
+```
+
 For PUT and PATCH requests, JSON is used as the default format.
+
+## License
+
+This project is licensed under the MIT License - see the LICENSE file for details.

@@ -2,44 +2,50 @@
 
 namespace Raza\PHPImpersonate;
 
+use InvalidArgumentException;
 use Raza\PHPImpersonate\Browser\Browser;
 use Raza\PHPImpersonate\Browser\BrowserInterface;
+use Raza\PHPImpersonate\Exception\PlatformNotSupportedException;
 use Raza\PHPImpersonate\Exception\RequestException;
+use Raza\PHPImpersonate\Platform\CommandBuilder;
+use Raza\PHPImpersonate\Platform\PlatformDetector;
+use RuntimeException;
 
 class PHPImpersonate implements ClientInterface
 {
     private const DEFAULT_BROWSER = 'chrome99_android';
     private const DEFAULT_TIMEOUT = 30;
+    private const MAX_TIMEOUT = 3600; // 1 hour max
+    private const MIN_TIMEOUT = 1;
+    private const PROCESS_TIMEOUT_BUFFER = 5;
 
     private BrowserInterface $browser;
+    private array $tempFiles = [];
 
     /**
      * @param string|BrowserInterface $browser Browser to use (name or browser instance)
      * @param int $timeout Request timeout in seconds
      * @param array<string,mixed> $curlOptions Custom curl options
      * @throws RequestException If the browser is invalid or platform is not supported
+     * @throws InvalidArgumentException If timeout is invalid
      */
     public function __construct(
         string|BrowserInterface $browser = self::DEFAULT_BROWSER,
         private int $timeout = self::DEFAULT_TIMEOUT,
         private array $curlOptions = []
     ) {
-        // Check if running on Linux
-        if (PHP_OS !== 'Linux' && strpos(PHP_OS, 'Linux') === false) {
-            throw new RequestException(
-                'PHP-Impersonate requires a Linux operating system. Current OS: ' . PHP_OS
-            );
-        }
+        $this->validateTimeout($timeout);
+        $this->validatePlatform();
+        $this->initializeBrowser($browser);
+        $this->validateCurlOptions($curlOptions);
+    }
 
-        if (is_string($browser)) {
-            try {
-                $this->browser = new Browser($browser);
-            } catch (\RuntimeException $e) {
-                throw new RequestException($e->getMessage(), 0, $e);
-            }
-        } else {
-            $this->browser = $browser;
-        }
+    /**
+     * Cleanup temp files on destruction
+     */
+    public function __destruct()
+    {
+        $this->cleanupAllTempFiles();
     }
 
     /**
@@ -47,38 +53,31 @@ class PHPImpersonate implements ClientInterface
      */
     public function send(Request $request): Response
     {
-        $method = $request->getMethod();
-        $url = $request->getUrl();
-        $headers = $request->getHeaders();
-        $body = $request->getBody();
+        $this->validateRequest($request);
 
         $tempFiles = $this->createTempFiles();
 
         try {
             $command = $this->buildCommand(
-                $method,
-                $url,
+                $request->getMethod(),
+                $request->getUrl(),
                 $tempFiles['body'],
                 $tempFiles['headers'],
-                $headers,
-                $body
+                $request->getHeaders(),
+                $request->getBody()
             );
 
             $result = $this->runCommand($command);
 
-            $responseBody = file_exists($tempFiles['body'])
-                ? (file_get_contents($tempFiles['body']) ?: '')
-                : '';
+            $responseBody = $this->readTempFile($tempFiles['body']);
+            $responseHeaders = $this->parseHeaders(
+                $this->readTempFile($tempFiles['headers'])
+            );
 
             $statusCode = (int)$result['status_code'];
 
-            $responseHeaders = $this->parseHeaders(
-                file_exists($tempFiles['headers'])
-                    ? (file_get_contents($tempFiles['headers']) ?: '')
-                    : ''
-            );
-
             return new Response($responseBody, $statusCode, $responseHeaders);
+
         } finally {
             $this->cleanupTempFiles($tempFiles);
         }
@@ -98,24 +97,7 @@ class PHPImpersonate implements ClientInterface
     public function sendPost(string $url, ?array $data = null, array $headers = []): Response
     {
         $headers = $this->normalizeHeaders($headers);
-
-        // Check if JSON content type is specified
-        $isJson = isset($headers['Content-Type']) &&
-                  strpos($headers['Content-Type'], 'application/json') !== false;
-
-        // Encode data appropriately based on Content-Type
-        $body = null;
-        if ($data !== null) {
-            if ($isJson) {
-                $body = json_encode($data);
-            } else {
-                $body = http_build_query($data);
-                // Set default Content-Type for form data if not specified
-                if (! isset($headers['Content-Type'])) {
-                    $headers['Content-Type'] = 'application/x-www-form-urlencoded';
-                }
-            }
-        }
+        $body = $this->prepareRequestBody($data, $headers);
 
         return $this->send(Request::post($url, $headers, $body));
     }
@@ -142,22 +124,7 @@ class PHPImpersonate implements ClientInterface
     public function sendPatch(string $url, ?array $data = null, array $headers = []): Response
     {
         $headers = $this->normalizeHeaders($headers);
-
-        // Check if JSON content type is specified
-        $isJson = isset($headers['Content-Type']) &&
-                  strpos($headers['Content-Type'], 'application/json') !== false;
-
-        // Encode data appropriately
-        $body = null;
-        if ($data !== null) {
-            $body = $isJson ? json_encode($data) : http_build_query($data);
-        }
-
-        // Add default content type if not specified
-        if ($data !== null && ! isset($headers['Content-Type'])) {
-            $headers['Content-Type'] = 'application/json';
-            $body = json_encode($data);
-        }
+        $body = $this->prepareRequestBody($data, $headers, 'application/json');
 
         return $this->send(Request::patch($url, $headers, $body));
     }
@@ -169,10 +136,9 @@ class PHPImpersonate implements ClientInterface
     {
         $headers = $this->normalizeHeaders($headers);
 
-        // Always use JSON for PUT requests - this is the standard
         if ($data !== null) {
             $headers['Content-Type'] = 'application/json';
-            $body = json_encode($data);
+            $body = json_encode($data, JSON_THROW_ON_ERROR);
         } else {
             $body = null;
         }
@@ -180,17 +146,7 @@ class PHPImpersonate implements ClientInterface
         return $this->send(Request::put($url, $headers, $body));
     }
 
-    /**
-     * Static version - Get the response from a URL using GET method
-     *
-     * @param string $url The URL to request
-     * @param array<string,string> $headers Headers to send with the request
-     * @param int $timeout Timeout in seconds
-     * @param string $browser Browser to impersonate
-     * @param array<string,mixed> $curlOptions Custom curl options to add to the request
-     * @return Response
-     * @throws RequestException
-     */
+    // Static convenience methods
     public static function get(
         string $url,
         array $headers = [],
@@ -198,23 +154,9 @@ class PHPImpersonate implements ClientInterface
         string $browser = self::DEFAULT_BROWSER,
         array $curlOptions = []
     ): Response {
-        $client = new self($browser, $timeout, $curlOptions);
-
-        return $client->sendGet($url, $headers);
+        return (new self($browser, $timeout, $curlOptions))->sendGet($url, $headers);
     }
 
-    /**
-     * Static version - Post data to a URL and return response
-     *
-     * @param string $url The URL to request
-     * @param array<string,mixed>|null $data Data to send with the POST request
-     * @param array<string,string> $headers Headers to send with the request
-     * @param int $timeout Timeout in seconds
-     * @param string $browser Browser to impersonate
-     * @param array<string,mixed> $curlOptions Custom curl options to add to the request
-     * @return Response
-     * @throws RequestException
-     */
     public static function post(
         string $url,
         ?array $data = null,
@@ -223,22 +165,9 @@ class PHPImpersonate implements ClientInterface
         string $browser = self::DEFAULT_BROWSER,
         array $curlOptions = []
     ): Response {
-        $client = new self($browser, $timeout, $curlOptions);
-
-        return $client->sendPost($url, $data, $headers);
+        return (new self($browser, $timeout, $curlOptions))->sendPost($url, $data, $headers);
     }
 
-    /**
-     * Static version - Get headers and status code for a URL using HEAD request
-     *
-     * @param string $url The URL to request
-     * @param array<string,string> $headers Headers to send with the request
-     * @param int $timeout Timeout in seconds
-     * @param string $browser Browser to impersonate
-     * @param array<string,mixed> $curlOptions Custom curl options to add to the request
-     * @return Response
-     * @throws RequestException
-     */
     public static function head(
         string $url,
         array $headers = [],
@@ -246,22 +175,9 @@ class PHPImpersonate implements ClientInterface
         string $browser = self::DEFAULT_BROWSER,
         array $curlOptions = []
     ): Response {
-        $client = new self($browser, $timeout, $curlOptions);
-
-        return $client->sendHead($url, $headers);
+        return (new self($browser, $timeout, $curlOptions))->sendHead($url, $headers);
     }
 
-    /**
-     * Static version - Delete a resource at a URL
-     *
-     * @param string $url The URL to request
-     * @param array<string,string> $headers Headers to send with the request
-     * @param int $timeout Timeout in seconds
-     * @param string $browser Browser to impersonate
-     * @param array<string,mixed> $curlOptions Custom curl options to add to the request
-     * @return Response
-     * @throws RequestException
-     */
     public static function delete(
         string $url,
         array $headers = [],
@@ -269,23 +185,9 @@ class PHPImpersonate implements ClientInterface
         string $browser = self::DEFAULT_BROWSER,
         array $curlOptions = []
     ): Response {
-        $client = new self($browser, $timeout, $curlOptions);
-
-        return $client->sendDelete($url, $headers);
+        return (new self($browser, $timeout, $curlOptions))->sendDelete($url, $headers);
     }
 
-    /**
-     * Static version - Patch a resource at a URL
-     *
-     * @param string $url The URL to request
-     * @param array<string,mixed>|null $data Data to send with the PATCH request
-     * @param array<string,string> $headers Headers to send with the request
-     * @param int $timeout Timeout in seconds
-     * @param string $browser Browser to impersonate
-     * @param array<string,mixed> $curlOptions Custom curl options to add to the request
-     * @return Response
-     * @throws RequestException
-     */
     public static function patch(
         string $url,
         ?array $data = null,
@@ -294,23 +196,9 @@ class PHPImpersonate implements ClientInterface
         string $browser = self::DEFAULT_BROWSER,
         array $curlOptions = []
     ): Response {
-        $client = new self($browser, $timeout, $curlOptions);
-
-        return $client->sendPatch($url, $data, $headers);
+        return (new self($browser, $timeout, $curlOptions))->sendPatch($url, $data, $headers);
     }
 
-    /**
-     * Static version - Put a resource at a URL
-     *
-     * @param string $url The URL to request
-     * @param array<string,mixed>|null $data Data to send with the PUT request
-     * @param array<string,string> $headers Headers to send with the request
-     * @param int $timeout Timeout in seconds
-     * @param string $browser Browser to impersonate
-     * @param array<string,mixed> $curlOptions Custom curl options to add to the request
-     * @return Response
-     * @throws RequestException
-     */
     public static function put(
         string $url,
         ?array $data = null,
@@ -319,53 +207,221 @@ class PHPImpersonate implements ClientInterface
         string $browser = self::DEFAULT_BROWSER,
         array $curlOptions = []
     ): Response {
-        $client = new self($browser, $timeout, $curlOptions);
-
-        return $client->sendPut($url, $data, $headers);
+        return (new self($browser, $timeout, $curlOptions))->sendPut($url, $data, $headers);
     }
 
     /**
-     * Create temporary files for the request/response
-     *
-     * @return array{body: string, headers: string}
+     * Validate timeout value
      */
-    private function createTempFiles(): array
+    private function validateTimeout(int $timeout): void
     {
-        // Create with more reliable permissions
-        $bodyFile = tempnam(sys_get_temp_dir(), 'curl_impersonate_body');
-        $headerFile = tempnam(sys_get_temp_dir(), 'curl_impersonate_headers');
-
-        // Ensure files are writable
-        if (! is_writable($bodyFile) || ! is_writable($headerFile)) {
-            throw new RequestException("Unable to create writable temporary files");
+        if ($timeout < self::MIN_TIMEOUT || $timeout > self::MAX_TIMEOUT) {
+            throw new InvalidArgumentException(
+                sprintf(
+                    'Timeout must be between %d and %d seconds, got %d',
+                    self::MIN_TIMEOUT,
+                    self::MAX_TIMEOUT,
+                    $timeout
+                )
+            );
         }
-
-        // Set permissions to be extra sure
-        chmod($bodyFile, 0644);
-        chmod($headerFile, 0644);
-
-        return [
-            'body' => $bodyFile,
-            'headers' => $headerFile,
-        ];
     }
 
     /**
-     * Clean up temporary files
-     *
-     * @param array{body: string, headers: string} $files Temporary files to clean up
+     * Validate platform support
      */
-    private function cleanupTempFiles(array $files): void
+    private function validatePlatform(): void
     {
-        foreach ($files as $file) {
-            if (file_exists($file)) {
-                unlink($file);
+        if (! PlatformDetector::isSupported()) {
+            $platform = PlatformDetector::getPlatform();
+
+            throw new PlatformNotSupportedException(
+                $platform,
+                [PlatformDetector::PLATFORM_LINUX, PlatformDetector::PLATFORM_WINDOWS]
+            );
+        }
+    }
+
+    /**
+     * Initialize browser instance
+     */
+    private function initializeBrowser(string|BrowserInterface $browser): void
+    {
+        if (is_string($browser)) {
+            try {
+                $this->browser = new Browser($browser);
+            } catch (RuntimeException $e) {
+                throw new RequestException("Invalid browser: " . $e->getMessage(), 0, $e);
+            }
+        } else {
+            $this->browser = $browser;
+        }
+    }
+
+    /**
+     * Validate curl options
+     */
+    private function validateCurlOptions(array $curlOptions): void
+    {
+        $forbiddenOptions = ['o', 'output', 'D', 'dump-header', 'w', 'write-out'];
+
+        foreach ($forbiddenOptions as $option) {
+            if (isset($curlOptions[$option])) {
+                throw new InvalidArgumentException(
+                    "Curl option '$option' is not allowed as it conflicts with internal usage"
+                );
             }
         }
     }
 
     /**
-     * Build the curl command with proper handling of JSON data
+     * Validate request object
+     */
+    private function validateRequest(Request $request): void
+    {
+        if (empty(trim($request->getUrl()))) {
+            throw new InvalidArgumentException('URL cannot be empty');
+        }
+
+        if (! filter_var($request->getUrl(), FILTER_VALIDATE_URL)) {
+            throw new InvalidArgumentException('Invalid URL format');
+        }
+    }
+
+    /**
+     * Prepare request body based on content type and data
+     */
+    private function prepareRequestBody(
+        ?array $data,
+        array &$headers,
+        string $defaultContentType = 'application/x-www-form-urlencoded'
+    ): ?string {
+        if ($data === null) {
+            return null;
+        }
+
+        $contentType = $headers['Content-Type'] ?? null;
+        $isJson = $contentType && str_contains($contentType, 'application/json');
+
+        if ($isJson) {
+            try {
+                return json_encode($data, JSON_THROW_ON_ERROR);
+            } catch (\JsonException $e) {
+                throw new InvalidArgumentException('Failed to encode data as JSON: ' . $e->getMessage());
+            }
+        }
+
+        // Set default content type if not specified
+        if (! isset($headers['Content-Type'])) {
+            $headers['Content-Type'] = $defaultContentType;
+        }
+
+        if ($defaultContentType === 'application/json') {
+            try {
+                return json_encode($data, JSON_THROW_ON_ERROR);
+            } catch (\JsonException $e) {
+                throw new InvalidArgumentException('Failed to encode data as JSON: ' . $e->getMessage());
+            }
+        }
+
+        return http_build_query($data);
+    }
+
+    /**
+     * Create temporary files for the request/response
+     */
+    private function createTempFiles(): array
+    {
+        $bodyFile = $this->createTempFile('curl_impersonate_body');
+        $headerFile = $this->createTempFile('curl_impersonate_headers');
+
+        $files = [
+            'body' => $bodyFile,
+            'headers' => $headerFile,
+        ];
+
+        // Track temp files for cleanup
+        $this->tempFiles = array_merge($this->tempFiles, array_values($files));
+
+        return $files;
+    }
+
+    /**
+     * Create a single temporary file
+     */
+    private function createTempFile(string $prefix): string
+    {
+        $tempFile = tempnam(sys_get_temp_dir(), $prefix);
+
+        if ($tempFile === false) {
+            throw new RequestException('Unable to create temporary file');
+        }
+
+        if (! is_writable($tempFile)) {
+            @unlink($tempFile);
+
+            throw new RequestException('Created temporary file is not writable');
+        }
+
+        // Set safe permissions
+        if (! chmod($tempFile, 0644)) {
+            @unlink($tempFile);
+
+            throw new RequestException('Unable to set temporary file permissions');
+        }
+
+        return $tempFile;
+    }
+
+    /**
+     * Read content from temporary file
+     */
+    private function readTempFile(string $filePath): string
+    {
+        if (! file_exists($filePath)) {
+            return '';
+        }
+
+        $content = file_get_contents($filePath);
+
+        return $content !== false ? $content : '';
+    }
+
+    /**
+     * Clean up temporary files
+     */
+    private function cleanupTempFiles(array $files): void
+    {
+        foreach ($files as $file) {
+            $this->deleteTempFile($file);
+            // Remove from tracking
+            $this->tempFiles = array_diff($this->tempFiles, [$file]);
+        }
+    }
+
+    /**
+     * Clean up all tracked temporary files
+     */
+    private function cleanupAllTempFiles(): void
+    {
+        foreach ($this->tempFiles as $file) {
+            $this->deleteTempFile($file);
+        }
+        $this->tempFiles = [];
+    }
+
+    /**
+     * Delete a single temporary file
+     */
+    private function deleteTempFile(string $file): void
+    {
+        if (file_exists($file)) {
+            @unlink($file);
+        }
+    }
+
+    /**
+     * Build the curl command
      */
     private function buildCommand(
         string $method,
@@ -377,77 +433,81 @@ class PHPImpersonate implements ClientInterface
     ): string {
         $browserCmd = $this->browser->getExecutablePath();
 
-        // Base command with method and URL
-        $cmd = sprintf(
-            '%s -s -L -w "%%{http_code}" --max-time %d -o "%s" -D "%s" -X %s',
-            escapeshellcmd($browserCmd),
-            $this->timeout,
-            $outputFile,
-            $headerFile,
-            $method
-        );
+        $options = $this->buildCurlOptions($method, $outputFile, $headerFile, $headers);
 
-        // Add headers
-        foreach ($headers as $name => $value) {
-            $cmd .= sprintf(' -H %s', escapeshellarg("$name: $value"));
-        }
-
-        // Add request body if present
         if ($body !== null) {
-            // Check if it's JSON data
-            $isJson = isset($headers['Content-Type']) &&
-                      strpos($headers['Content-Type'], 'application/json') !== false;
-
-            if ($isJson) {
-                // Create temporary file for the data
-                $bodyFile = tempnam(sys_get_temp_dir(), 'curl_impersonate_body');
-                file_put_contents($bodyFile, $body);
-                $cmd .= sprintf(' --data-binary @%s', escapeshellarg($bodyFile));
-                // Add cleanup for this file
-                register_shutdown_function(function () use ($bodyFile) {
-                    if (file_exists($bodyFile)) {
-                        @unlink($bodyFile);
-                    }
-                });
-            } else {
-                // For form data, use direct data parameter
-                $cmd .= sprintf(' --data %s', escapeshellarg($body));
-            }
+            $this->addBodyToOptions($options, $body, $headers);
         }
 
-        // Add custom curl options
-        foreach ($this->curlOptions as $option => $value) {
-            if (is_bool($value)) {
-                if ($value) {
-                    $cmd .= " --$option";
-                }
-            } else {
-                $cmd .= sprintf(' --%s %s', $option, escapeshellarg((string)$value));
-            }
+        // Add custom curl options (validated ones only)
+        $options = array_merge($options, $this->curlOptions);
+
+        try {
+            return CommandBuilder::buildCurlCommand($browserCmd, [$url], $options);
+        } catch (\Exception $e) {
+            throw new RequestException('Failed to build curl command: ' . $e->getMessage(), 0, $e);
         }
-
-        // Add URL
-        $cmd .= ' ' . escapeshellarg($url);
-
-        return $cmd;
     }
 
     /**
-     * Run the curl command with timeout protection
-     *
-     * @param string $command The command to execute
-     * @return array{status_code: string, output: array}
-     * @throws RequestException If command execution fails
+     * Build base curl options
+     */
+    private function buildCurlOptions(
+        string $method,
+        string $outputFile,
+        string $headerFile,
+        array $headers
+    ): array {
+        $options = [
+            's' => true, // silent mode
+            'L' => true, // follow redirects
+            'w' => '%{http_code}', // write out format
+            'max-time' => $this->timeout,
+            'o' => $outputFile, // output file
+            'D' => $headerFile, // dump headers file
+            'X' => $method, // HTTP method
+        ];
+
+        // Add headers
+        if (! empty($headers)) {
+            foreach ($headers as $name => $value) {
+                $options['H'][] = "$name: $value";
+            }
+        }
+
+        return $options;
+    }
+
+    /**
+     * Add request body to curl options
+     */
+    private function addBodyToOptions(array &$options, string $body, array $headers): void
+    {
+        $contentType = $headers['Content-Type'] ?? '';
+        $isJson = str_contains($contentType, 'application/json');
+
+        if ($isJson) {
+            // Use data-binary for JSON to preserve formatting
+            $bodyFile = $this->createTempFile('curl_body_data');
+
+            if (file_put_contents($bodyFile, $body) === false) {
+                throw new RequestException('Failed to write request body to temporary file');
+            }
+
+            $options['data-binary'] = "@$bodyFile";
+        } else {
+            // Use data for form data
+            $options['data'] = $body;
+        }
+    }
+
+    /**
+     * Run the curl command with enhanced error handling
      */
     private function runCommand(string $command): array
     {
-        $output = [];
-        $returnVar = null;
+        $processTimeout = $this->timeout + self::PROCESS_TIMEOUT_BUFFER;
 
-        // Set a process timeout slightly longer than the curl timeout
-        $processTimeout = $this->timeout + 5;
-
-        // Use proc_open instead of exec for better control
         $descriptorspec = [
             0 => ["pipe", "r"],  // stdin
             1 => ["pipe", "w"],  // stdout
@@ -460,142 +520,164 @@ class PHPImpersonate implements ClientInterface
             throw new RequestException("Failed to execute command: $command");
         }
 
-        // Set pipes to non-blocking mode
-        stream_set_blocking($pipes[1], false);
-        stream_set_blocking($pipes[2], false);
+        try {
+            return $this->handleProcess($process, $pipes, $processTimeout, $command);
+        } finally {
+            $this->closeProcess($process, $pipes);
+        }
+    }
 
+    /**
+     * Handle process execution with timeout
+     */
+    private function handleProcess($process, array $pipes, int $timeout, string $command): array
+    {
         // Close stdin
         fclose($pipes[0]);
 
-        // Set start time
-        $startTime = time();
-        $outputContent = '';
-        $errorContent = '';
+        // Set pipes to non-blocking
+        stream_set_blocking($pipes[1], false);
+        stream_set_blocking($pipes[2], false);
 
-        // Read output with timeout
+        $startTime = time();
+        $output = '';
+        $errors = '';
+
         while (true) {
             $status = proc_get_status($process);
 
-            // Process has exited
             if (! $status['running']) {
                 break;
             }
 
-            // Check for timeout
-            if ((time() - $startTime) > $processTimeout) {
+            if ((time() - $startTime) > $timeout) {
                 proc_terminate($process, 9); // SIGKILL
-                proc_close($process);
 
                 throw new RequestException(
-                    "Command execution timed out after $processTimeout seconds: $command",
+                    "Command execution timed out after $timeout seconds",
                     0,
                     null,
-                    $command,
-                    ['Timeout occurred']
+                    $command
                 );
             }
 
-            // Read from stdout and stderr
-            $stdout = fread($pipes[1], 8192);
-            $stderr = fread($pipes[2], 8192);
+            // Read available data
+            $stdout = stream_get_contents($pipes[1]);
+            $stderr = stream_get_contents($pipes[2]);
 
-            if ($stdout) {
-                $outputContent .= $stdout;
+            if ($stdout !== false) {
+                $output .= $stdout;
+            }
+            if ($stderr !== false) {
+                $errors .= $stderr;
             }
 
-            if ($stderr) {
-                $errorContent .= $stderr;
-            }
-
-            // Prevent CPU overuse
-            usleep(10000); // 10ms
+            usleep(10000); // 10ms sleep to prevent CPU spinning
         }
 
-        // Get any remaining output
-        while ($stdout = fread($pipes[1], 8192)) {
-            $outputContent .= $stdout;
-        }
+        // Get remaining output
+        $output .= stream_get_contents($pipes[1]) ?: '';
+        $errors .= stream_get_contents($pipes[2]) ?: '';
 
-        while ($stderr = fread($pipes[2], 8192)) {
-            $errorContent .= $stderr;
-        }
-
-        // Close pipes
-        fclose($pipes[1]);
-        fclose($pipes[2]);
-
-        // Get exit code
         $exitCode = proc_close($process);
 
-        // Process output
-        $output = array_filter(explode("\n", $outputContent));
-        $errorOutput = array_filter(explode("\n", $errorContent));
+        return $this->processCommandOutput($output, $errors, $exitCode, $command);
+    }
 
-        // Merge stderr into output for consistent handling
-        if (! empty($errorOutput)) {
-            $output = array_merge($output, $errorOutput);
+    /**
+     * Close process and pipes safely
+     */
+    private function closeProcess($process, array $pipes): void
+    {
+        foreach (array_slice($pipes, 1) as $pipe) { // Skip stdin (already closed)
+            if (is_resource($pipe)) {
+                fclose($pipe);
+            }
         }
 
-        $lastLine = end($output);
+        if (is_resource($process)) {
+            proc_close($process);
+        }
+    }
 
-        if ($exitCode !== 0 && $status['exitcode'] !== 0) {
-            // For HEAD requests specifically, we'll be more lenient
-            if (strpos($command, '-X HEAD') !== false &&
-                is_numeric($lastLine) &&
-                ((int)$lastLine >= 200 && (int)$lastLine < 400)) {
-                // This is likely a successful HEAD request despite the non-zero exit code
-                return [
-                    'status_code' => $lastLine,
-                    'output' => $output,
-                ];
-            }
+    /**
+     * Process command output and determine success/failure
+     */
+    private function processCommandOutput(
+        string $output,
+        string $errors,
+        int $exitCode,
+        string $command
+    ): array {
+        $outputLines = array_filter(explode("\n", trim($output)));
+        $errorLines = array_filter(explode("\n", trim($errors)));
 
-            // Otherwise, throw an exception with the output for debugging
-            $errorOutput = implode("\n", $output);
+        $lastLine = end($outputLines) ?: '';
+        $statusCode = is_numeric($lastLine) ? $lastLine : '0';
+
+        // Check if we have a valid HTTP status code
+        $hasValidStatusCode = is_numeric($statusCode) &&
+                             ((int)$statusCode >= 100 && (int)$statusCode < 600);
+
+        // Consider request successful if we have a valid HTTP status code
+        if ($exitCode !== 0 && ! $hasValidStatusCode) {
+            $allOutput = array_merge($outputLines, $errorLines);
+            $errorMessage = implode("\n", $allOutput);
 
             throw new RequestException(
-                "Command execution failed with code $exitCode: $errorOutput",
+                "Command execution failed with exit code $exitCode: $errorMessage",
                 $exitCode,
                 null,
                 $command,
-                $output
+                $allOutput
             );
         }
 
         return [
-            'status_code' => is_numeric($lastLine) ? $lastLine : '0',
-            'output' => $output,
+            'status_code' => $statusCode,
+            'output' => array_merge($outputLines, $errorLines),
         ];
     }
 
     /**
-     * Parse response headers
-     *
-     * @param string $headersContent Raw headers
-     * @return array<string,string> Parsed headers
+     * Parse response headers with improved handling
      */
     private function parseHeaders(string $headersContent): array
     {
+        if (empty(trim($headersContent))) {
+            return [];
+        }
+
         $headers = [];
 
-        // Split into header sections separated by empty lines and get last response
+        // Handle multiple HTTP responses (redirects)
         $sections = preg_split('/\r?\n\r?\n/', trim($headersContent));
 
         if (! $sections) {
             return [];
         }
 
+        // Get the last response headers
         $lastSection = end($sections);
+        $lines = explode("\n", $lastSection);
 
-        foreach (explode("\n", $lastSection) as $line) {
+        foreach ($lines as $line) {
             $line = trim($line);
-            if (empty($line) || strpos($line, 'HTTP/') === 0) {
+
+            // Skip empty lines and status lines
+            if (empty($line) || str_starts_with($line, 'HTTP/')) {
                 continue;
             }
 
-            $parts = explode(':', $line, 2);
-            if (count($parts) === 2) {
-                $headers[trim($parts[0])] = trim($parts[1]);
+            // Parse header line
+            $colonPos = strpos($line, ':');
+            if ($colonPos !== false) {
+                $name = trim(substr($line, 0, $colonPos));
+                $value = trim(substr($line, $colonPos + 1));
+
+                if (! empty($name)) {
+                    $headers[$name] = $value;
+                }
             }
         }
 
@@ -603,24 +685,26 @@ class PHPImpersonate implements ClientInterface
     }
 
     /**
-     * Normalize headers from various formats to a consistent format
-     *
-     * @param array<mixed> $headers Headers in various formats
-     * @return array<string,string> Normalized headers
+     * Normalize headers with improved validation
      */
     private function normalizeHeaders(array $headers): array
     {
         $normalized = [];
 
         foreach ($headers as $key => $value) {
-            if (is_numeric($key)) {
-                // If it contains a colon, it's already formatted
-                if (is_string($value) && strpos($value, ':') !== false) {
-                    list($headerName, $headerValue) = array_map('trim', explode(':', $value, 2));
-                    $normalized[$headerName] = $headerValue;
+            if (is_int($key) && is_string($value)) {
+                // Handle "Header: Value" format
+                $colonPos = strpos($value, ':');
+                if ($colonPos !== false) {
+                    $headerName = trim(substr($value, 0, $colonPos));
+                    $headerValue = trim(substr($value, $colonPos + 1));
+
+                    if (! empty($headerName)) {
+                        $normalized[$headerName] = $headerValue;
+                    }
                 }
-            } else {
-                $normalized[$key] = $value;
+            } elseif (is_string($key) && (is_string($value) || is_numeric($value))) {
+                $normalized[$key] = (string)$value;
             }
         }
 

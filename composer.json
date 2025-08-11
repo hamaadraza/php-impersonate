@@ -20,8 +20,7 @@
     },
     "require-dev": {
         "pestphp/pest": "^3.0",
-        "friendsofphp/php-cs-fixer": "^3.21.1",
-        "spatie/ray": "^1.28"
+        "friendsofphp/php-cs-fixer": "^3.21.1"
     },
     "autoload": {
         "psr-4": {

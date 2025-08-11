@@ -36,9 +36,9 @@ class Browser implements BrowserInterface
      */
     private function resolveExecutablePath(): void
     {
-        $platform   = PlatformDetector::getPlatform();
-        $extension  = PlatformDetector::getFileExtension();
-        $binaryDir  = PlatformDetector::getBinaryDir();
+        $platform = PlatformDetector::getPlatform();
+        $extension = PlatformDetector::getFileExtension();
+        $binaryDir = PlatformDetector::getBinaryDir();
 
         $binaryFile = "curl_{$this->name}{$extension}";
 
@@ -48,12 +48,13 @@ class Browser implements BrowserInterface
             // Vendor bin directory
             $this->buildPath(__DIR__ . "/../../../../{$binaryDir}", $binaryFile),
             // Platform-specific global paths
-            ...$this->getSystemPaths($platform, $binaryFile)
+            ...$this->getSystemPaths($platform, $binaryFile),
         ]);
 
         foreach ($paths as $path) {
             if ($this->isUsableExecutable($path, $platform)) {
                 $this->executablePath = $path;
+
                 return;
             }
 
@@ -62,6 +63,7 @@ class Browser implements BrowserInterface
                 $resolved = $this->findInPath($path, $platform);
                 if ($resolved) {
                     $this->executablePath = $resolved;
+
                     return;
                 }
             }
@@ -81,6 +83,7 @@ class Browser implements BrowserInterface
     private function buildPath(string $baseDir, string $file): ?string
     {
         $realDir = realpath($baseDir);
+
         return $realDir ? $realDir . DIRECTORY_SEPARATOR . $file : null;
     }
 
@@ -90,9 +93,9 @@ class Browser implements BrowserInterface
     private function getSystemPaths(string $platform, string $binaryFile): array
     {
         return match ($platform) {
-            PlatformDetector::PLATFORM_LINUX   => ["/usr/local/bin/{$binaryFile}", $binaryFile],
+            PlatformDetector::PLATFORM_LINUX => ["/usr/local/bin/{$binaryFile}", $binaryFile],
             PlatformDetector::PLATFORM_WINDOWS => [$binaryFile],
-            default                            => [$binaryFile],
+            default => [$binaryFile],
         };
     }
 
@@ -109,7 +112,7 @@ class Browser implements BrowserInterface
      */
     private function isCommandName(string $path): bool
     {
-        return !$this->isAbsolutePath($path);
+        return ! $this->isAbsolutePath($path);
     }
 
     /**

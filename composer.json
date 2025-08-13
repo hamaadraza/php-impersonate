@@ -42,7 +42,8 @@
         "allow-plugins": {
             "pestphp/pest-plugin": true,
             "phpstan/extension-installer": true
-        }
+        },
+        "bin-compat": "full"
     },
     "minimum-stability": "dev",
     "prefer-stable": true,

@@ -72,12 +72,31 @@ class PHPImpersonate implements ClientInterface
 
             $result = $this->runCommand($command);
 
+            // On Windows with .bat files, the output might not be written to files properly
+            // So we capture the response directly from the command output
             $responseBody = $this->readTempFile($tempFiles['body']);
+            $extractedStatus = null;
+            
+            // If the temp file is empty, try to get response from command output
+            if (empty($responseBody) && !empty($result['output'])) {
+                $extracted = $this->captureResponseFromOutput($result['output']);
+                $responseBody = $extracted['body'];
+                $extractedStatus = $extracted['status'];
+            }
+            
             $responseHeaders = $this->parseHeaders(
                 $this->readTempFile($tempFiles['headers'])
             );
+            
 
-            $statusCode = (int)$result['status_code'];
+            
+            // If we still don't have a proper status code, try to extract it from headers
+            if ($extractedStatus === '0' || $extractedStatus === 0) {
+                $extractedStatus = $this->extractStatusFromHeaders($responseHeaders);
+            }
+
+            // Use extracted status code if available, otherwise use the one from result
+            $statusCode = $extractedStatus !== null ? (int)$extractedStatus : (int)$result['status_code'];
 
             return new Response($responseBody, $statusCode, $responseHeaders);
 
@@ -397,6 +416,71 @@ class PHPImpersonate implements ClientInterface
     }
 
     /**
+     * Capture response body and status code from command output array
+     * This handles the case where .bat files don't properly redirect output to files
+     */
+    private function captureResponseFromOutput(array $output): array
+    {
+        if (empty($output)) {
+            return ['body' => '', 'status' => '0'];
+        }
+
+        // Join all output lines
+        $fullOutput = implode("\n", $output);
+        
+        // Remove any trailing temp file paths that might be added by curl on Windows
+        $fullOutput = preg_replace('/\S+\\\\.*\.tmp$/', '', $fullOutput);
+        $fullOutput = trim($fullOutput);
+        
+        // The response should be everything except the last line which contains the status code
+        $lines = explode("\n", $fullOutput);
+        $statusCode = '0';
+        
+        // Extract the status code from the last line if it's numeric
+        if (count($lines) > 1) {
+            $lastLine = trim(end($lines));
+            if (is_numeric($lastLine) && strlen($lastLine) <= 3) {
+                $statusCode = $lastLine;
+                // Remove the status code line
+                array_pop($lines);
+                $fullOutput = implode("\n", $lines);
+            }
+        } elseif (count($lines) === 1) {
+            // If there's only one line and it's a numeric status code, it's likely a HEAD request
+            $singleLine = trim($lines[0]);
+            if (is_numeric($singleLine) && strlen($singleLine) <= 3) {
+                $statusCode = $singleLine;
+                $fullOutput = ''; // HEAD requests should have empty body
+            }
+        }
+        
+        return ['body' => $fullOutput, 'status' => $statusCode];
+    }
+
+    /**
+     * Extract HTTP status code from response headers
+     */
+    private function extractStatusFromHeaders(array $headers): string
+    {
+        // Look for the HTTP status line we captured
+        if (isset($headers['HTTP_STATUS'])) {
+            if (preg_match('/(\d{3})/', $headers['HTTP_STATUS'], $matches)) {
+                return $matches[1];
+            }
+        }
+        
+        // Fallback: check if we have any header that might contain status info
+        foreach ($headers as $name => $value) {
+            if (preg_match('/HTTP\/\d\.\d\s+(\d+)/', $value, $matches)) {
+                return $matches[1];
+            }
+        }
+        
+        // Default to 200 if we can't determine
+        return '200';
+    }
+
+    /**
      * Clean up temporary files
      */
     private function cleanupTempFiles(array $files): void
@@ -480,7 +564,8 @@ class PHPImpersonate implements ClientInterface
         array $headers
     ): array {
         $options = [
-            's' => true, // silent mode
+            's' => true, // silent mode,
+            'no-progress-meter' => true,
             'L' => true, // follow redirects
             'w' => '%{http_code}', // write out format
             'max-time' => $this->timeout,
@@ -736,8 +821,14 @@ class PHPImpersonate implements ClientInterface
         foreach ($lines as $line) {
             $line = trim($line);
 
-            // Skip empty lines and status lines
-            if (empty($line) || str_starts_with($line, 'HTTP/')) {
+            // Skip empty lines
+            if (empty($line)) {
+                continue;
+            }
+
+            // Capture HTTP status line
+            if (str_starts_with($line, 'HTTP/')) {
+                $headers['HTTP_STATUS'] = $line;
                 continue;
             }
 

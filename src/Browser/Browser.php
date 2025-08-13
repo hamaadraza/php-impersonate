@@ -69,11 +69,23 @@ class Browser implements BrowserInterface
         // Look for the main curl-impersonate binary
         $binaryFile = $platform === PlatformDetector::PLATFORM_WINDOWS ? 'curl.exe' : 'curl-impersonate';
 
-        $paths = array_filter([
+        $possiblePaths = [
             // Package bin directory
             $this->buildPath(__DIR__ . "/../../{$binaryDir}", $binaryFile),
-            // Vendor bin directory
-            $this->buildPath(__DIR__ . "/../../../../{$binaryDir}", $binaryFile),
+        ];
+
+        if(PlatformDetector::isWindows()) {
+            // Look for curl.exe.bat that composer creates
+            $possiblePaths[] = $this->buildPath(__DIR__ . "/../../../../bin", $binaryFile.'.bat');
+        }
+
+        if(PlatformDetector::isLinux()) {
+            // Look for curl-impersonate that composer creates
+            $possiblePaths[] = $this->buildPath(__DIR__ . "/../../../../bin", $binaryFile);
+        }
+
+        $paths = array_filter([
+            ...$possiblePaths,
             // Platform-specific global paths
             ...$this->getSystemPaths($platform, $binaryFile),
         ]);
@@ -146,9 +158,34 @@ class Browser implements BrowserInterface
      */
     private function isUsableExecutable(string $path, string $platform): bool
     {
-        return $this->isAbsolutePath($path)
-            && file_exists($path)
-            && ($platform === PlatformDetector::PLATFORM_WINDOWS || is_executable($path));
+        if (!$this->isAbsolutePath($path) || !file_exists($path)) {
+            return false;
+        }
+
+        if ($platform !== PlatformDetector::PLATFORM_WINDOWS && !is_executable($path)) {
+            return false;
+        }
+
+        // Verify this is actually curl-impersonate, not regular curl
+        return $this->isCurlImpersonate($path, $platform);
+    }
+
+    /**
+     * Verify that the binary is actually curl-impersonate
+     */
+    private function isCurlImpersonate(string $path, string $platform): bool
+    {
+        $errorRedirect = $platform === PlatformDetector::PLATFORM_WINDOWS ? '2>nul' : '2>/dev/null';
+        $versionCommand = escapeshellarg($path) . ' --version ' . $errorRedirect;
+        
+        $output = shell_exec($versionCommand);
+        
+        if (!$output) {
+            return false;
+        }
+        
+        // Check if the output contains "IMPERSONATE" which indicates curl-impersonate
+        return str_contains($output, 'IMPERSONATE');
     }
 
     /**

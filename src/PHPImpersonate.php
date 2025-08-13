@@ -76,20 +76,20 @@ class PHPImpersonate implements ClientInterface
             // So we capture the response directly from the command output
             $responseBody = $this->readTempFile($tempFiles['body']);
             $extractedStatus = null;
-            
+
             // If the temp file is empty, try to get response from command output
-            if (empty($responseBody) && !empty($result['output'])) {
+            if (empty($responseBody) && ! empty($result['output'])) {
                 $extracted = $this->captureResponseFromOutput($result['output']);
                 $responseBody = $extracted['body'];
                 $extractedStatus = $extracted['status'];
             }
-            
+
             $responseHeaders = $this->parseHeaders(
                 $this->readTempFile($tempFiles['headers'])
             );
-            
 
-            
+
+
             // If we still don't have a proper status code, try to extract it from headers
             if ($extractedStatus === '0' || $extractedStatus === 0) {
                 $extractedStatus = $this->extractStatusFromHeaders($responseHeaders);
@@ -427,15 +427,15 @@ class PHPImpersonate implements ClientInterface
 
         // Join all output lines
         $fullOutput = implode("\n", $output);
-        
+
         // Remove any trailing temp file paths that might be added by curl on Windows
         $fullOutput = preg_replace('/\S+\\\\.*\.tmp$/', '', $fullOutput);
         $fullOutput = trim($fullOutput);
-        
+
         // The response should be everything except the last line which contains the status code
         $lines = explode("\n", $fullOutput);
         $statusCode = '0';
-        
+
         // Extract the status code from the last line if it's numeric
         if (count($lines) > 1) {
             $lastLine = trim(end($lines));
@@ -453,7 +453,7 @@ class PHPImpersonate implements ClientInterface
                 $fullOutput = ''; // HEAD requests should have empty body
             }
         }
-        
+
         return ['body' => $fullOutput, 'status' => $statusCode];
     }
 
@@ -468,14 +468,14 @@ class PHPImpersonate implements ClientInterface
                 return $matches[1];
             }
         }
-        
+
         // Fallback: check if we have any header that might contain status info
         foreach ($headers as $name => $value) {
             if (preg_match('/HTTP\/\d\.\d\s+(\d+)/', $value, $matches)) {
                 return $matches[1];
             }
         }
-        
+
         // Default to 200 if we can't determine
         return '200';
     }
@@ -829,6 +829,7 @@ class PHPImpersonate implements ClientInterface
             // Capture HTTP status line
             if (str_starts_with($line, 'HTTP/')) {
                 $headers['HTTP_STATUS'] = $line;
+
                 continue;
             }
 

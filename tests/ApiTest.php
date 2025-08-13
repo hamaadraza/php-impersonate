@@ -23,7 +23,7 @@ class ApiTest extends TestCase
     public function testGet()
     {
         $this->waitBetweenRequests();
-        
+
         $response = PHPImpersonate::get('https://httpbin.org/get', [
             'X-Test-Header' => 'test-value',
         ]);
@@ -39,7 +39,7 @@ class ApiTest extends TestCase
     public function testClientGet()
     {
         $this->waitBetweenRequests();
-        
+
         $client = new PHPImpersonate();
         $response = $client->sendGet('https://httpbin.org/get');
 
@@ -53,7 +53,7 @@ class ApiTest extends TestCase
     public function testPost()
     {
         $this->waitBetweenRequests();
-        
+
         $formData = [
             'name' => 'John Doe',
             'email' => 'john.doe@example.com',
@@ -76,7 +76,7 @@ class ApiTest extends TestCase
     public function testClientPost()
     {
         $this->waitBetweenRequests();
-        
+
         $client = new PHPImpersonate();
 
         $formData = [
@@ -98,7 +98,7 @@ class ApiTest extends TestCase
     public function testHead()
     {
         $this->waitBetweenRequests();
-        
+
         $response = PHPImpersonate::head('https://httpbin.org/get', [
             'X-Test-Header' => 'test-value',
         ]);
@@ -114,7 +114,7 @@ class ApiTest extends TestCase
     public function testClientHead()
     {
         $this->waitBetweenRequests();
-        
+
         $client = new PHPImpersonate();
         $response = $client->sendHead('https://httpbin.org/get');
 
@@ -128,7 +128,7 @@ class ApiTest extends TestCase
     public function testDelete()
     {
         $this->waitBetweenRequests();
-        
+
         $response = PHPImpersonate::delete('https://httpbin.org/delete', [
             'X-Test-Header' => 'test-value',
         ]);
@@ -144,7 +144,7 @@ class ApiTest extends TestCase
     public function testClientDelete()
     {
         $this->waitBetweenRequests();
-        
+
         $client = new PHPImpersonate();
         $response = $client->sendDelete('https://httpbin.org/delete');
 
@@ -158,7 +158,7 @@ class ApiTest extends TestCase
     public function testPatch()
     {
         $this->waitBetweenRequests();
-        
+
         $data = [
             'name' => 'Updated Name',
             'job' => 'Developer',
@@ -185,7 +185,7 @@ class ApiTest extends TestCase
     public function testClientPatch()
     {
         $this->waitBetweenRequests();
-        
+
         $client = new PHPImpersonate();
 
         $data = [
@@ -210,7 +210,7 @@ class ApiTest extends TestCase
     public function testPut()
     {
         $this->waitBetweenRequests();
-        
+
         $data = [
             'id' => 123,
             'title' => 'New Resource',
@@ -247,7 +247,7 @@ class ApiTest extends TestCase
     public function testClientPut()
     {
         $this->waitBetweenRequests();
-        
+
         $client = new PHPImpersonate();
 
         $data = [
@@ -274,7 +274,7 @@ class ApiTest extends TestCase
     public function testResponseStatus()
     {
         $this->waitBetweenRequests();
-        
+
         $response = PHPImpersonate::get('https://httpbin.org/status/201');
         $this->assertEquals(201, $response->status());
 
@@ -295,7 +295,7 @@ class ApiTest extends TestCase
     public function testRequestWithHeaders()
     {
         $this->waitBetweenRequests();
-        
+
         $headers = [
             'X-Custom-Header' => 'CustomValue',
             'User-Agent' => 'PHPImpersonate Test',
@@ -319,7 +319,7 @@ class ApiTest extends TestCase
     public function testRequestTimeout()
     {
         $this->waitBetweenRequests();
-        
+
         $this->expectException(RequestException::class);
 
         // Set a very short timeout (1 second) to trigger a timeout exception
@@ -336,7 +336,7 @@ class ApiTest extends TestCase
     public function testResponseDebugMethods()
     {
         $this->waitBetweenRequests();
-        
+
         $response = PHPImpersonate::get('https://httpbin.org/get');
 
         // Test dump() method returns a string
@@ -362,7 +362,7 @@ class ApiTest extends TestCase
     public function testResponseHeaders()
     {
         $this->waitBetweenRequests();
-        
+
         $response = PHPImpersonate::get('https://httpbin.org/response-headers?X-Test-Header=test-value');
 
         $this->assertEquals('test-value', $response->header('X-Test-Header'));
@@ -386,7 +386,7 @@ class ApiTest extends TestCase
     public function testDebugHeaders()
     {
         $this->waitBetweenRequests();
-        
+
         $response = PHPImpersonate::get('https://httpbin.org/response-headers');
 
         // Capture output to variable instead of printing directly
@@ -406,7 +406,7 @@ class ApiTest extends TestCase
     public function testDebugPutResponse()
     {
         $this->waitBetweenRequests();
-        
+
         $data = ['test' => 'value'];
         $response = PHPImpersonate::put('https://httpbin.org/put', $data);
 
@@ -427,7 +427,7 @@ class ApiTest extends TestCase
     public function testBasicSetup()
     {
         $this->waitBetweenRequests();
-        
+
         // Use PHP's built-in request instead of curl_impersonate for a basic check
         $result = file_get_contents('https://httpbin.org/get');
         $this->assertNotFalse($result);
@@ -446,7 +446,7 @@ class ApiTest extends TestCase
     public function testPostWithFormData()
     {
         $this->waitBetweenRequests();
-        
+
         $formData = [
             'name' => 'John Doe',
             'email' => 'john.doe@example.com',
@@ -470,7 +470,7 @@ class ApiTest extends TestCase
     public function testPostWithJsonData()
     {
         $this->waitBetweenRequests();
-        
+
         $jsonData = [
             'name' => 'John Doe',
             'email' => 'john.doe@example.com',

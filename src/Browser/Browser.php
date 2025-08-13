@@ -74,12 +74,12 @@ class Browser implements BrowserInterface
             $this->buildPath(__DIR__ . "/../../{$binaryDir}", $binaryFile),
         ];
 
-        if(PlatformDetector::isWindows()) {
+        if (PlatformDetector::isWindows()) {
             // Look for curl.exe.bat that composer creates
             $possiblePaths[] = $this->buildPath(__DIR__ . "/../../../../bin", $binaryFile.'.bat');
         }
 
-        if(PlatformDetector::isLinux()) {
+        if (PlatformDetector::isLinux()) {
             // Look for curl-impersonate that composer creates
             $possiblePaths[] = $this->buildPath(__DIR__ . "/../../../../bin", $binaryFile);
         }
@@ -158,11 +158,11 @@ class Browser implements BrowserInterface
      */
     private function isUsableExecutable(string $path, string $platform): bool
     {
-        if (!$this->isAbsolutePath($path) || !file_exists($path)) {
+        if (! $this->isAbsolutePath($path) || ! file_exists($path)) {
             return false;
         }
 
-        if ($platform !== PlatformDetector::PLATFORM_WINDOWS && !is_executable($path)) {
+        if ($platform !== PlatformDetector::PLATFORM_WINDOWS && ! is_executable($path)) {
             return false;
         }
 
@@ -177,13 +177,13 @@ class Browser implements BrowserInterface
     {
         $errorRedirect = $platform === PlatformDetector::PLATFORM_WINDOWS ? '2>nul' : '2>/dev/null';
         $versionCommand = escapeshellarg($path) . ' --version ' . $errorRedirect;
-        
+
         $output = shell_exec($versionCommand);
-        
-        if (!$output) {
+
+        if (! $output) {
             return false;
         }
-        
+
         // Check if the output contains "IMPERSONATE" which indicates curl-impersonate
         return str_contains($output, 'IMPERSONATE');
     }

@@ -9,6 +9,7 @@ use RuntimeException;
 class Browser implements BrowserInterface
 {
     private string $executablePath;
+    private array $config;
 
     /**
      * @param string $name Browser name (e.g., 'chrome99_android')
@@ -16,6 +17,7 @@ class Browser implements BrowserInterface
      */
     public function __construct(private string $name)
     {
+        $this->validateBrowser();
         $this->resolveExecutablePath();
     }
 
@@ -29,18 +31,42 @@ class Browser implements BrowserInterface
         return $this->name;
     }
 
+    public function getConfig(): array
+    {
+        return $this->config;
+    }
+
     /**
-     * Resolve the executable path for the browser
+     * Validate that the browser configuration exists
      *
-     * @throws RuntimeException If the browser is not found
+     * @throws RuntimeException If the browser is not supported
+     */
+    private function validateBrowser(): void
+    {
+        if (!BrowserConfig::hasConfig($this->name)) {
+            $availableBrowsers = BrowserConfig::getAvailableBrowsers();
+            throw new RuntimeException(sprintf(
+                "Browser '%s' not supported. Available browsers: %s",
+                $this->name,
+                implode(', ', $availableBrowsers)
+            ));
+        }
+
+        $this->config = BrowserConfig::getConfig($this->name);
+    }
+
+    /**
+     * Resolve the executable path for the curl-impersonate binary
+     *
+     * @throws RuntimeException If the binary is not found
      */
     private function resolveExecutablePath(): void
     {
         $platform = PlatformDetector::getPlatform();
-        $extension = PlatformDetector::getFileExtension();
         $binaryDir = PlatformDetector::getBinaryDir();
 
-        $binaryFile = "curl_{$this->name}{$extension}";
+        // Look for the main curl-impersonate binary
+        $binaryFile = $platform === PlatformDetector::PLATFORM_WINDOWS ? 'curl.exe' : 'curl-impersonate';
 
         $paths = array_filter([
             // Package bin directory
@@ -70,8 +96,7 @@ class Browser implements BrowserInterface
         }
 
         throw new RuntimeException(sprintf(
-            "Browser '%s' not supported on %s - executable not found. Checked paths: %s",
-            $this->name,
+            "curl-impersonate binary not found on %s. Checked paths: %s",
             $platform,
             implode(', ', $paths)
         ));

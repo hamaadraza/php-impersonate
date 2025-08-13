@@ -441,6 +441,7 @@ class PHPImpersonate implements ClientInterface
         ?string $body = null
     ): array {
         $browserCmd = $this->browser->getExecutablePath();
+        $browserConfig = $this->browser->getConfig();
 
         $options = $this->buildCurlOptions($method, $outputFile, $headerFile, $headers);
         $additionalTempFiles = [];
@@ -448,6 +449,9 @@ class PHPImpersonate implements ClientInterface
         if ($body !== null) {
             $additionalTempFiles = $this->addBodyToOptions($options, $body, $headers);
         }
+
+        // Add browser-specific configuration
+        $options = $this->mergeBrowserConfig($options, $browserConfig);
 
         // Add custom curl options (validated ones only)
         $options = array_merge($options, $this->curlOptions);
@@ -524,6 +528,49 @@ class PHPImpersonate implements ClientInterface
         }
 
         return [$bodyFile];
+    }
+
+    /**
+     * Merge browser configuration with curl options
+     */
+    private function mergeBrowserConfig(array $options, array $browserConfig): array
+    {
+        // Add ciphers if specified
+        if (isset($browserConfig['ciphers'])) {
+            $options['ciphers'] = $browserConfig['ciphers'];
+        }
+
+        // Add curves if specified
+        if (isset($browserConfig['curves'])) {
+            $options['curves'] = $browserConfig['curves'];
+        }
+
+        // Add signature hashes if specified
+        if (isset($browserConfig['signature-hashes'])) {
+            $options['signature-hashes'] = $browserConfig['signature-hashes'];
+        }
+
+        // Add browser-specific headers
+        if (isset($browserConfig['headers'])) {
+            foreach ($browserConfig['headers'] as $name => $value) {
+                $options['H'][] = "$name: $value";
+            }
+        }
+
+        // Add browser-specific options
+        if (isset($browserConfig['options'])) {
+            foreach ($browserConfig['options'] as $option => $value) {
+                if (is_bool($value)) {
+                    if ($value) {
+                        $options[$option] = true;
+                    }
+                } else {
+                    $options[$option] = $value;
+                }
+            }
+        }
+
+        return $options;
     }
 
     /**

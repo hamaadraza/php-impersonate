@@ -964,11 +964,11 @@ class BrowserConfig
     public static function getConfig(string $browserName): array
     {
         $configs = self::getAllConfigs();
-        
-        if (!isset($configs[$browserName])) {
+
+        if (! isset($configs[$browserName])) {
             throw new \InvalidArgumentException("Browser configuration not found: {$browserName}");
         }
-        
+
         return $configs[$browserName];
     }
 

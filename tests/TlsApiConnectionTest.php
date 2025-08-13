@@ -19,7 +19,7 @@ class TlsApiConnectionTest extends TestCase
 
         $this->assertEquals(200, $response->status());
         $this->assertNotEmpty($response->body());
-        
+
         $data = $response->json();
         $this->assertIsArray($data);
         $this->assertArrayHasKey('tls', $data);
@@ -36,9 +36,9 @@ class TlsApiConnectionTest extends TestCase
         $response = $client->sendGet(self::TLS_FINGERPRINT_API);
 
         $this->assertEquals(200, $response->status());
-        
+
         $data = $response->json();
-        
+
         // Verify top-level keys (based on actual API response)
         $expectedKeys = [
             'donate',
@@ -48,13 +48,13 @@ class TlsApiConnectionTest extends TestCase
             'user_agent',
             'tls',
             'http2',
-            'tcpip'
+            'tcpip',
         ];
-        
+
         foreach ($expectedKeys as $key) {
             $this->assertArrayHasKey($key, $data, "Response should contain key: $key");
         }
-        
+
         // Verify TLS structure
         $tls = $data['tls'];
         $expectedTlsKeys = [
@@ -69,21 +69,21 @@ class TlsApiConnectionTest extends TestCase
             'peetprint',
             'peetprint_hash',
             'client_random',
-            'session_id'
+            'session_id',
         ];
-        
+
         foreach ($expectedTlsKeys as $key) {
             $this->assertArrayHasKey($key, $tls, "TLS data should contain key: $key");
         }
-        
+
         // Verify HTTP/2 structure
         $http2 = $data['http2'];
         $expectedHttp2Keys = [
             'akamai_fingerprint',
             'akamai_fingerprint_hash',
-            'sent_frames'
+            'sent_frames',
         ];
-        
+
         foreach ($expectedHttp2Keys as $key) {
             $this->assertArrayHasKey($key, $http2, "HTTP/2 data should contain key: $key");
         }
@@ -95,19 +95,19 @@ class TlsApiConnectionTest extends TestCase
     public function testDifferentHttpMethods()
     {
         $client = new PHPImpersonate('chrome110');
-        
+
         // Test GET
         $response = $client->sendGet(self::TLS_FINGERPRINT_API);
         $this->assertEquals(200, $response->status());
         $data = $response->json();
         $this->assertEquals('GET', $data['method']);
-        
+
         // Test POST
         $response = $client->sendPost(self::TLS_FINGERPRINT_API, ['test' => 'data']);
         $this->assertEquals(200, $response->status());
         $data = $response->json();
         $this->assertEquals('POST', $data['method']);
-        
+
         // Test HEAD
         $response = $client->sendHead(self::TLS_FINGERPRINT_API);
         $this->assertEquals(200, $response->status());
@@ -121,19 +121,19 @@ class TlsApiConnectionTest extends TestCase
         $client = new PHPImpersonate('chrome110');
         $customHeaders = [
             'X-Test-Header' => 'test-value',
-            'X-Another-Header' => 'another-value'
+            'X-Another-Header' => 'another-value',
         ];
-        
+
         $response = $client->sendGet(self::TLS_FINGERPRINT_API, $customHeaders);
         $this->assertEquals(200, $response->status());
-        
+
         $data = $response->json();
-        
+
         // Verify that TLS fingerprinting still works with custom headers
         $this->assertArrayHasKey('tls', $data);
         $this->assertArrayHasKey('ja3', $data['tls']);
         $this->assertNotEmpty($data['tls']['ja3']);
-        
+
         // Verify that the request was successful despite custom headers
         $this->assertArrayHasKey('user_agent', $data);
         $this->assertArrayHasKey('http_version', $data);
@@ -146,17 +146,17 @@ class TlsApiConnectionTest extends TestCase
     public function testApiAccessibility()
     {
         $client = new PHPImpersonate('chrome110');
-        
+
         // Test multiple requests to ensure API is stable
         for ($i = 0; $i < 3; $i++) {
             $response = $client->sendGet(self::TLS_FINGERPRINT_API);
             $this->assertEquals(200, $response->status());
-            
+
             $data = $response->json();
             $this->assertArrayHasKey('tls', $data);
             $this->assertArrayHasKey('ja3', $data['tls']);
             $this->assertNotEmpty($data['tls']['ja3']);
-            
+
             // Small delay to avoid overwhelming the API
             usleep(100000); // 100ms
         }
@@ -168,7 +168,7 @@ class TlsApiConnectionTest extends TestCase
     public function testErrorHandling()
     {
         $client = new PHPImpersonate('chrome110');
-        
+
         // Test with invalid URL
         $this->expectException(\Exception::class);
         $client->sendGet('https://invalid-domain-that-does-not-exist-12345.com');
@@ -183,7 +183,7 @@ class TlsApiConnectionTest extends TestCase
         $response = $client->sendGet(self::TLS_FINGERPRINT_API);
 
         $this->assertEquals(200, $response->status());
-        
+
         $data = $response->json();
         $this->assertArrayHasKey('user_agent', $data);
         $this->assertArrayHasKey('tls', $data);

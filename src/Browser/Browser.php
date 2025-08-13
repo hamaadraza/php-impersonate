@@ -43,8 +43,9 @@ class Browser implements BrowserInterface
      */
     private function validateBrowser(): void
     {
-        if (!BrowserConfig::hasConfig($this->name)) {
+        if (! BrowserConfig::hasConfig($this->name)) {
             $availableBrowsers = BrowserConfig::getAvailableBrowsers();
+
             throw new RuntimeException(sprintf(
                 "Browser '%s' not supported. Available browsers: %s",
                 $this->name,

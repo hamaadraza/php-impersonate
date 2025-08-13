@@ -21,7 +21,7 @@ class BrowserConfigTest extends TestCase
         foreach ($configs as $browserName => $config) {
             $this->assertIsString($browserName);
             $this->assertIsArray($config);
-            
+
             // Check for required sections
             $this->assertArrayHasKey('headers', $config);
             $this->assertArrayHasKey('options', $config);

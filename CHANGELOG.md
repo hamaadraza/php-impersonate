@@ -2,9 +2,19 @@
 
 All notable changes to `php-impersonate` will be documented in this file.
 
+## v1.0.4 - 2025-12-16
+
+### What's Changed
+
+* build(deps): bump stefanzweifel/git-auto-commit-action from 6 to 7 by @dependabot[bot] in https://github.com/hamaadraza/php-impersonate/pull/9
+* build(deps): bump actions/checkout from 4 to 6 by @dependabot[bot] in https://github.com/hamaadraza/php-impersonate/pull/10
+
+**Full Changelog**: https://github.com/hamaadraza/php-impersonate/compare/v1.0.3...v1.0.4
+
 ## v1.1.0 - 2025-08-11
 
 ### Added
+
 - **Cross-platform support**: Added Windows support with native Windows binaries
 - **Platform detection**: New `PlatformDetector` class for automatic OS detection
 - **Platform-specific configuration**: New `Configuration` class for platform-specific settings
@@ -13,11 +23,13 @@ All notable changes to `php-impersonate` will be documented in this file.
 - **Comprehensive tests**: Added platform detection tests
 
 ### Changed
+
 - **Breaking change**: Removed Linux-only restriction, now supports Linux and Windows
 - **Updated documentation**: README now reflects cross-platform support
 - **Improved error messages**: More descriptive platform-related error messages
 
 ### Technical Details
+
 - Windows binaries are stored in `bin/windows/` directory
 - Linux binaries remain in `bin/linux/` directory
 - Automatic platform detection and binary selection

@@ -6,6 +6,8 @@ use Raza\PHPImpersonate\Exception\RequestException;
 
 /**
  * Factory class providing backward compatibility with static methods
+ *
+ * @phpstan-type BrowserName 'chrome99'|'chrome99_android'|'chrome100'|'chrome101'|'chrome104'|'chrome107'|'chrome110'|'chrome116'|'chrome119'|'chrome120'|'chrome123'|'chrome124'|'chrome131'|'chrome131_android'|'chrome133a'|'chrome136'|'edge99'|'edge101'|'firefox133'|'firefox135'|'safari153'|'safari155'|'safari170'|'safari172_ios'|'safari180'|'safari180_ios'|'safari184'|'safari184_ios'|'safari260'|'safari260_ios'|'tor145'
  */
 class PHPImpersonateFactory
 {
@@ -15,7 +17,7 @@ class PHPImpersonateFactory
      * @param string $url The URL to request
      * @param array<string,string> $headers Headers to send with the request
      * @param int $timeout Timeout in seconds
-     * @param string $browser Browser to impersonate
+     * @param BrowserName $browser Browser to impersonate (see BrowserName constants)
      * @param array<string,mixed> $curlOptions Custom curl options to add to the request
      * @return Response
      * @throws RequestException
@@ -39,7 +41,7 @@ class PHPImpersonateFactory
      * @param array<string,mixed>|null $data Data to send with the POST request
      * @param array<string,string> $headers Headers to send with the request
      * @param int $timeout Timeout in seconds
-     * @param string $browser Browser to impersonate
+     * @param BrowserName $browser Browser to impersonate (see BrowserName constants)
      * @param array<string,mixed> $curlOptions Custom curl options to add to the request
      * @return Response
      * @throws RequestException
@@ -63,7 +65,7 @@ class PHPImpersonateFactory
      * @param string $url The URL to request
      * @param array<string,string> $headers Headers to send with the request
      * @param int $timeout Timeout in seconds
-     * @param string $browser Browser to impersonate
+     * @param BrowserName $browser Browser to impersonate (see BrowserName constants)
      * @param array<string,mixed> $curlOptions Custom curl options to add to the request
      * @return Response
      * @throws RequestException
@@ -86,7 +88,7 @@ class PHPImpersonateFactory
      * @param string $url The URL to request
      * @param array<string,string> $headers Headers to send with the request
      * @param int $timeout Timeout in seconds
-     * @param string $browser Browser to impersonate
+     * @param BrowserName $browser Browser to impersonate (see BrowserName constants)
      * @param array<string,mixed> $curlOptions Custom curl options to add to the request
      * @return Response
      * @throws RequestException
@@ -110,7 +112,7 @@ class PHPImpersonateFactory
      * @param array<string,mixed>|null $data Data to send with the PATCH request
      * @param array<string,string> $headers Headers to send with the request
      * @param int $timeout Timeout in seconds
-     * @param string $browser Browser to impersonate
+     * @param BrowserName $browser Browser to impersonate (see BrowserName constants)
      * @param array<string,mixed> $curlOptions Custom curl options to add to the request
      * @return Response
      * @throws RequestException
@@ -135,7 +137,7 @@ class PHPImpersonateFactory
      * @param array<string,mixed>|null $data Data to send with the PUT request
      * @param array<string,string> $headers Headers to send with the request
      * @param int $timeout Timeout in seconds
-     * @param string $browser Browser to impersonate
+     * @param BrowserName $browser Browser to impersonate (see BrowserName constants)
      * @param array<string,mixed> $curlOptions Custom curl options to add to the request
      * @return Response
      * @throws RequestException

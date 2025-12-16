@@ -11,6 +11,9 @@ use Raza\PHPImpersonate\Platform\CommandBuilder;
 use Raza\PHPImpersonate\Platform\PlatformDetector;
 use RuntimeException;
 
+/**
+ * @phpstan-type BrowserName 'chrome99'|'chrome99_android'|'chrome100'|'chrome101'|'chrome104'|'chrome107'|'chrome110'|'chrome116'|'chrome119'|'chrome120'|'chrome123'|'chrome124'|'chrome131'|'chrome131_android'|'chrome133a'|'chrome136'|'edge99'|'edge101'|'firefox133'|'firefox135'|'safari153'|'safari155'|'safari170'|'safari172_ios'|'safari180'|'safari180_ios'|'safari184'|'safari184_ios'|'safari260'|'safari260_ios'|'tor145'
+ */
 class PHPImpersonate implements ClientInterface
 {
     private const DEFAULT_BROWSER = 'chrome99_android';
@@ -23,7 +26,13 @@ class PHPImpersonate implements ClientInterface
     private array $tempFiles = [];
 
     /**
-     * @param string|BrowserInterface $browser Browser to use (name or browser instance)
+     * @param BrowserName|BrowserInterface $browser Browser to use (name or browser instance).
+     *                                               Available browsers: chrome99, chrome99_android, chrome100, chrome101,
+     *                                               chrome104, chrome107, chrome110, chrome116, chrome119, chrome120,
+     *                                               chrome123, chrome124, chrome131, chrome131_android, chrome133a,
+     *                                               chrome136, edge99, edge101, firefox133, firefox135, safari153,
+     *                                               safari155, safari170, safari172_ios, safari180, safari180_ios,
+     *                                               safari184, safari184_ios, safari260, safari260_ios, tor145
      * @param int $timeout Request timeout in seconds
      * @param array<string,mixed> $curlOptions Custom curl options
      * @throws RequestException If the browser is invalid or platform is not supported
@@ -156,6 +165,9 @@ class PHPImpersonate implements ClientInterface
     }
 
     // Static convenience methods
+    /**
+     * @param BrowserName $browser Browser name (see BrowserName constants or constructor docblock)
+     */
     public static function get(
         string $url,
         array $headers = [],
@@ -166,6 +178,9 @@ class PHPImpersonate implements ClientInterface
         return (new self($browser, $timeout, $curlOptions))->sendGet($url, $headers);
     }
 
+    /**
+     * @param BrowserName $browser Browser name (see BrowserName constants or constructor docblock)
+     */
     public static function post(
         string $url,
         ?array $data = null,
@@ -177,6 +192,9 @@ class PHPImpersonate implements ClientInterface
         return (new self($browser, $timeout, $curlOptions))->sendPost($url, $data, $headers);
     }
 
+    /**
+     * @param BrowserName $browser Browser name (see BrowserName constants or constructor docblock)
+     */
     public static function head(
         string $url,
         array $headers = [],
@@ -187,6 +205,9 @@ class PHPImpersonate implements ClientInterface
         return (new self($browser, $timeout, $curlOptions))->sendHead($url, $headers);
     }
 
+    /**
+     * @param BrowserName $browser Browser name (see BrowserName constants or constructor docblock)
+     */
     public static function delete(
         string $url,
         array $headers = [],
@@ -197,6 +218,9 @@ class PHPImpersonate implements ClientInterface
         return (new self($browser, $timeout, $curlOptions))->sendDelete($url, $headers);
     }
 
+    /**
+     * @param BrowserName $browser Browser name (see BrowserName constants or constructor docblock)
+     */
     public static function patch(
         string $url,
         ?array $data = null,
@@ -208,6 +232,9 @@ class PHPImpersonate implements ClientInterface
         return (new self($browser, $timeout, $curlOptions))->sendPatch($url, $data, $headers);
     }
 
+    /**
+     * @param BrowserName $browser Browser name (see BrowserName constants or constructor docblock)
+     */
     public static function put(
         string $url,
         ?array $data = null,

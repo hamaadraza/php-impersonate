@@ -52,13 +52,6 @@
     },
     "bin": [
         "bin/linux/curl-impersonate",
-        "bin/windows/brotli.exe",
-        "bin/windows/bssl.exe",
-        "bin/windows/curl-config",
-        "bin/windows/curl.exe",
-        "bin/windows/libcurl.dll",
-        "bin/windows/wcurl",
-        "bin/windows/zlib.dll",
-        "bin/windows/zstd.exe"
+        "bin/windows/curl.exe"
     ]
 }

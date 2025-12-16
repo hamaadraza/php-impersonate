@@ -14,7 +14,7 @@ class ApiTest extends TestCase
      */
     public function testGet()
     {
-        $response = PHPImpersonate::get('https://httpbin.org/get', [
+        $response = PHPImpersonate::get('https://httpbun.com/get', [
             'X-Test-Header' => 'test-value',
         ]);
 
@@ -29,7 +29,7 @@ class ApiTest extends TestCase
     public function testClientGet()
     {
         $client = new PHPImpersonate();
-        $response = $client->sendGet('https://httpbin.org/get');
+        $response = $client->sendGet('https://httpbun.com/get');
 
         $this->assertEquals(200, $response->status());
         $this->assertInstanceOf(Response::class, $response);
@@ -45,7 +45,7 @@ class ApiTest extends TestCase
             'email' => 'john.doe@example.com',
         ];
 
-        $response = PHPImpersonate::post('https://httpbin.org/post', $formData, [
+        $response = PHPImpersonate::post('https://httpbun.com/post', $formData, [
             'X-Test-Header' => 'test-value',
         ]);
 
@@ -68,7 +68,7 @@ class ApiTest extends TestCase
             'password' => 'password123',
         ];
 
-        $response = $client->sendPost('https://httpbin.org/post', $formData);
+        $response = $client->sendPost('https://httpbun.com/post', $formData);
 
         $this->assertEquals(200, $response->status());
         $responseData = $response->json();
@@ -81,7 +81,8 @@ class ApiTest extends TestCase
      */
     public function testHead()
     {
-        $response = PHPImpersonate::head('https://httpbin.org/get', [
+        // Use /any endpoint as it accepts any HTTP method including HEAD
+        $response = PHPImpersonate::head('https://httpbun.com/any', [
             'X-Test-Header' => 'test-value',
         ]);
 
@@ -96,7 +97,8 @@ class ApiTest extends TestCase
     public function testClientHead()
     {
         $client = new PHPImpersonate();
-        $response = $client->sendHead('https://httpbin.org/get');
+        // Use /any endpoint as it accepts any HTTP method including HEAD
+        $response = $client->sendHead('https://httpbun.com/any');
 
         $this->assertEquals(200, $response->status());
         $this->assertInstanceOf(Response::class, $response);
@@ -107,7 +109,7 @@ class ApiTest extends TestCase
      */
     public function testDelete()
     {
-        $response = PHPImpersonate::delete('https://httpbin.org/delete', [
+        $response = PHPImpersonate::delete('https://httpbun.com/delete', [
             'X-Test-Header' => 'test-value',
         ]);
 
@@ -122,7 +124,7 @@ class ApiTest extends TestCase
     public function testClientDelete()
     {
         $client = new PHPImpersonate();
-        $response = $client->sendDelete('https://httpbin.org/delete');
+        $response = $client->sendDelete('https://httpbun.com/delete');
 
         $this->assertEquals(200, $response->status());
         $this->assertInstanceOf(Response::class, $response);
@@ -138,7 +140,7 @@ class ApiTest extends TestCase
             'job' => 'Developer',
         ];
 
-        $response = PHPImpersonate::patch('https://httpbin.org/patch', $data, [
+        $response = PHPImpersonate::patch('https://httpbun.com/patch', $data, [
             'X-Test-Header' => 'test-value',
             'Content-Type' => 'application/json',
         ]);
@@ -165,7 +167,7 @@ class ApiTest extends TestCase
             'status' => 'Active',
         ];
 
-        $response = $client->sendPatch('https://httpbin.org/patch', $data);
+        $response = $client->sendPatch('https://httpbun.com/patch', $data);
 
         $this->assertEquals(200, $response->status());
         $responseData = $response->json();
@@ -187,7 +189,7 @@ class ApiTest extends TestCase
             'body' => 'Resource content',
         ];
 
-        $response = PHPImpersonate::put('https://httpbin.org/put', $data, [
+        $response = PHPImpersonate::put('https://httpbun.com/put', $data, [
             'X-Test-Header' => 'test-value',
             'Content-Type' => 'application/json',
         ]);
@@ -224,7 +226,7 @@ class ApiTest extends TestCase
             'description' => 'Updated content',
         ];
 
-        $response = $client->sendPut('https://httpbin.org/put', $data);
+        $response = $client->sendPut('https://httpbun.com/put', $data);
 
         $this->assertEquals(200, $response->status());
         $responseData = $response->json();
@@ -241,14 +243,14 @@ class ApiTest extends TestCase
      */
     public function testResponseStatus()
     {
-        $response = PHPImpersonate::get('https://httpbin.org/status/201');
+        $response = PHPImpersonate::get('https://httpbun.com/status/201');
         $this->assertEquals(201, $response->status());
 
-        $response = PHPImpersonate::get('https://httpbin.org/status/404');
+        $response = PHPImpersonate::get('https://httpbun.com/status/404');
         $this->assertEquals(404, $response->status());
         $this->assertFalse($response->isSuccess());
 
-        $response = PHPImpersonate::get('https://httpbin.org/status/500');
+        $response = PHPImpersonate::get('https://httpbun.com/status/500');
         $this->assertEquals(500, $response->status());
         $this->assertFalse($response->isSuccess());
     }
@@ -263,7 +265,7 @@ class ApiTest extends TestCase
             'User-Agent' => 'PHPImpersonate Test',
         ];
 
-        $response = PHPImpersonate::get('https://httpbin.org/headers', $headers);
+        $response = PHPImpersonate::get('https://httpbun.com/headers', $headers);
 
         $this->assertEquals(200, $response->status());
         $responseData = $response->json();
@@ -284,7 +286,7 @@ class ApiTest extends TestCase
 
         // Set a very short timeout (1 second) to trigger a timeout exception
         PHPImpersonate::get(
-            'https://httpbin.org/delay/3', // This endpoint delays response by 3 seconds
+            'https://httpbun.com/delay/3', // This endpoint delays response by 3 seconds
             [],
             1 // 1 second timeout
         );
@@ -295,7 +297,7 @@ class ApiTest extends TestCase
      */
     public function testResponseDebugMethods()
     {
-        $response = PHPImpersonate::get('https://httpbin.org/get');
+        $response = PHPImpersonate::get('https://httpbun.com/get');
 
         // Test dump() method returns a string
         $dump = $response->dump();
@@ -319,7 +321,7 @@ class ApiTest extends TestCase
      */
     public function testResponseHeaders()
     {
-        $response = PHPImpersonate::get('https://httpbin.org/response-headers?X-Test-Header=test-value');
+        $response = PHPImpersonate::get('https://httpbun.com/response-headers?X-Test-Header=test-value');
 
         $this->assertEquals('test-value', $response->header('X-Test-Header'));
         $this->assertNull($response->header('Non-Existent-Header'));
@@ -341,7 +343,7 @@ class ApiTest extends TestCase
      */
     public function testDebugHeaders()
     {
-        $response = PHPImpersonate::get('https://httpbin.org/response-headers');
+        $response = PHPImpersonate::get('https://httpbun.com/response-headers');
 
         // Capture output to variable instead of printing directly
         ob_start();
@@ -360,7 +362,7 @@ class ApiTest extends TestCase
     public function testDebugPutResponse()
     {
         $data = ['test' => 'value'];
-        $response = PHPImpersonate::put('https://httpbin.org/put', $data);
+        $response = PHPImpersonate::put('https://httpbun.com/put', $data);
 
         // Capture output to variable instead of printing directly
         ob_start();
@@ -379,7 +381,7 @@ class ApiTest extends TestCase
     public function testBasicSetup()
     {
         // Use PHP's built-in request instead of curl_impersonate for a basic check
-        $result = file_get_contents('https://httpbin.org/get');
+        $result = file_get_contents('https://httpbun.com/get');
         $this->assertNotFalse($result);
 
         // Now test file permissions
@@ -400,7 +402,7 @@ class ApiTest extends TestCase
             'email' => 'john.doe@example.com',
         ];
 
-        $response = PHPImpersonate::post('https://httpbin.org/post', $formData, [
+        $response = PHPImpersonate::post('https://httpbun.com/post', $formData, [
             'X-Test-Header' => 'test-value',
             'Content-Type' => 'application/x-www-form-urlencoded',
         ]);
@@ -422,7 +424,7 @@ class ApiTest extends TestCase
             'email' => 'john.doe@example.com',
         ];
 
-        $response = PHPImpersonate::post('https://httpbin.org/post', $jsonData, [
+        $response = PHPImpersonate::post('https://httpbun.com/post', $jsonData, [
             'X-Test-Header' => 'test-value',
             'Content-Type' => 'application/json',
         ]);

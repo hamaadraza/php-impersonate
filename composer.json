@@ -1,57 +1,57 @@
 {
-    "name": "hamaadraza/php-impersonate",
-    "version": "1.1.0",
-    "description": "A PHP library for making HTTP requests with browser impersonation",
-    "keywords": [
-        "hamaadraza",
-        "php-impersonate"
-    ],
-    "homepage": "https://github.com/hamaadraza/php-impersonate",
-    "license": "MIT",
-    "authors": [
-        {
-            "name": "Hamaad Raza",
-            "email": "hamaadraza9@gmail.com",
-            "role": "Developer"
-        }
-    ],
-    "require": {
-        "php": "^8"
+  "name": "hamaadraza/php-impersonate",
+  "version": "1.0.4",
+  "description": "A PHP library for making HTTP requests with browser impersonation",
+  "keywords": [
+    "hamaadraza",
+    "php-impersonate"
+  ],
+  "homepage": "https://github.com/hamaadraza/php-impersonate",
+  "license": "MIT",
+  "authors": [
+    {
+      "name": "Hamaad Raza",
+      "email": "hamaadraza9@gmail.com",
+      "role": "Developer"
+    }
+  ],
+  "require": {
+    "php": "^8"
+  },
+  "require-dev": {
+    "pestphp/pest": "^3.0",
+    "friendsofphp/php-cs-fixer": "^3.21.1"
+  },
+  "autoload": {
+    "psr-4": {
+      "Raza\\PHPImpersonate\\": "src"
+    }
+  },
+  "autoload-dev": {
+    "psr-4": {
+      "Raza\\PHPImpersonate\\Tests\\": "tests"
+    }
+  },
+  "scripts": {
+    "test": "vendor/bin/pest",
+    "test-coverage": "vendor/bin/pest --coverage",
+    "format": "vendor/bin/php-cs-fixer fix --config=.php-cs-fixer.dist.php --allow-risky=yes"
+  },
+  "config": {
+    "sort-packages": true,
+    "allow-plugins": {
+      "pestphp/pest-plugin": true,
+      "phpstan/extension-installer": true
     },
-    "require-dev": {
-        "pestphp/pest": "^3.0",
-        "friendsofphp/php-cs-fixer": "^3.21.1"
-    },
-    "autoload": {
-        "psr-4": {
-            "Raza\\PHPImpersonate\\": "src"
-        }
-    },
-    "autoload-dev": {
-        "psr-4": {
-            "Raza\\PHPImpersonate\\Tests\\": "tests"
-        }
-    },
-    "scripts": {
-        "test": "vendor/bin/pest",
-        "test-coverage": "vendor/bin/pest --coverage",
-        "format": "vendor/bin/php-cs-fixer fix --config=.php-cs-fixer.dist.php --allow-risky=yes"
-    },
-    "config": {
-        "sort-packages": true,
-        "allow-plugins": {
-            "pestphp/pest-plugin": true,
-            "phpstan/extension-installer": true
-        },
-        "bin-compat": "full"
-    },
-    "minimum-stability": "dev",
-    "prefer-stable": true,
-    "platform": {
-        "php": ">=8.0"
-    },
-    "bin": [
-        "bin/linux/curl-impersonate",
-        "bin/windows/curl.exe"
-    ]
+    "bin-compat": "full"
+  },
+  "minimum-stability": "dev",
+  "prefer-stable": true,
+  "platform": {
+    "php": ">=8.0"
+  },
+  "bin": [
+    "bin/linux/curl-impersonate",
+    "bin/windows/curl.exe"
+  ]
 }

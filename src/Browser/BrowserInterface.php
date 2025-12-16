@@ -17,4 +17,11 @@ interface BrowserInterface
      * @return string
      */
     public function getName(): string;
+
+    /**
+     * Get the browser configuration
+     *
+     * @return array<string,mixed>
+     */
+    public function getConfig(): array;
 }

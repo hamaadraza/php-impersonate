@@ -1,6 +1,6 @@
 <?php
 
-namespace Raza\PHPImpersonate\utils;
+namespace Raza\PHPImpersonate;
 
 function isRunningAsPackage(): bool
 {

@@ -11,7 +11,24 @@ $finder = Symfony\Component\Finder\Finder::create()
 
 return (new PhpCsFixer\Config())
     ->setRules([
+        // PSR-1 & PSR-12 compliance
         '@PSR12' => true,
+        
+        // Additional PSR-1 enforcement
+        'class_definition' => [
+            'single_line' => false,
+            'multi_line_extends_each_single_line' => true,
+        ],
+        'constant_case' => true, // PSR-1: Constants MUST be declared in all upper case
+        'lowercase_keywords' => true, // PSR-1: PHP keywords MUST be in lower case
+        'lowercase_static_reference' => true, // PSR-1: The static keyword MUST be declared in lower case
+        
+        // Additional PSR-12 enforcement
+        'declare_strict_types' => false, // Optional: uncomment to enforce strict types
+        'function_declaration' => true,
+        'visibility_required' => true, // PSR-12: Visibility MUST be declared on all properties and methods
+        
+        // Code quality rules that help maintain PSR compliance
         'array_syntax' => ['syntax' => 'short'],
         'ordered_imports' => ['sort_algorithm' => 'length'],
         'no_unused_imports' => true,
@@ -36,4 +53,5 @@ return (new PhpCsFixer\Config())
         ],
         'single_trait_insert_per_statement' => true,
     ])
-    ->setFinder($finder);
+    ->setFinder($finder)
+    ->setRiskyAllowed(true);

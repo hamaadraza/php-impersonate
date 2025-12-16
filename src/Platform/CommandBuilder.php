@@ -2,8 +2,8 @@
 
 namespace Raza\PHPImpersonate\Platform;
 
-use InvalidArgumentException;
 use RuntimeException;
+use InvalidArgumentException;
 
 class CommandBuilder
 {

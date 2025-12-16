@@ -2,12 +2,12 @@
 
 namespace Raza\PHPImpersonate\Tests;
 
+use RuntimeException;
 use InvalidArgumentException;
-use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
+use PHPUnit\Framework\Attributes\DataProvider;
 use Raza\PHPImpersonate\Platform\CommandBuilder;
 use Raza\PHPImpersonate\Platform\PlatformDetector;
-use RuntimeException;
 
 class CommandBuilderTest extends TestCase
 {

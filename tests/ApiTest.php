@@ -3,9 +3,9 @@
 namespace Raza\PHPImpersonate\Tests;
 
 use PHPUnit\Framework\TestCase;
-use Raza\PHPImpersonate\Exception\RequestException;
-use Raza\PHPImpersonate\PHPImpersonate;
 use Raza\PHPImpersonate\Response;
+use Raza\PHPImpersonate\PHPImpersonate;
+use Raza\PHPImpersonate\Exception\RequestException;
 
 class ApiTest extends TestCase
 {

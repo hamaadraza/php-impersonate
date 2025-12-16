@@ -2,9 +2,9 @@
 
 namespace Raza\PHPImpersonate\Browser;
 
+use RuntimeException;
 use Raza\PHPImpersonate\Config\Configuration;
 use Raza\PHPImpersonate\Platform\PlatformDetector;
-use RuntimeException;
 
 class Browser implements BrowserInterface
 {

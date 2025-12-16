@@ -2,14 +2,14 @@
 
 namespace Raza\PHPImpersonate;
 
+use RuntimeException;
 use InvalidArgumentException;
 use Raza\PHPImpersonate\Browser\Browser;
-use Raza\PHPImpersonate\Browser\BrowserInterface;
-use Raza\PHPImpersonate\Exception\PlatformNotSupportedException;
-use Raza\PHPImpersonate\Exception\RequestException;
 use Raza\PHPImpersonate\Platform\CommandBuilder;
+use Raza\PHPImpersonate\Browser\BrowserInterface;
 use Raza\PHPImpersonate\Platform\PlatformDetector;
-use RuntimeException;
+use Raza\PHPImpersonate\Exception\RequestException;
+use Raza\PHPImpersonate\Exception\PlatformNotSupportedException;
 
 /**
  * @phpstan-type BrowserName 'chrome99'|'chrome99_android'|'chrome100'|'chrome101'|'chrome104'|'chrome107'|'chrome110'|'chrome116'|'chrome119'|'chrome120'|'chrome123'|'chrome124'|'chrome131'|'chrome131_android'|'chrome133a'|'chrome136'|'edge99'|'edge101'|'firefox133'|'firefox135'|'safari153'|'safari155'|'safari170'|'safari172_ios'|'safari180'|'safari180_ios'|'safari184'|'safari184_ios'|'safari260'|'safari260_ios'|'tor145'

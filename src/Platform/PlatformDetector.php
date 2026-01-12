@@ -22,12 +22,14 @@ class PlatformDetector
     {
         $os = PHP_OS;
 
-        if (stripos($os, 'WIN') !== false || stripos($os, 'Windows') !== false) {
-            return self::PLATFORM_WINDOWS;
+        // Check Darwin/macOS FIRST - "Darwin" contains "win" which would match Windows check
+        if (stripos($os, 'Darwin') !== false) {
+            return self::PLATFORM_MACOS;
         }
 
-        if (stripos($os, 'Darwin') !== false || stripos($os, 'macOS') !== false) {
-            return self::PLATFORM_MACOS;
+        // Check for Windows (WINNT, WIN32, Windows)
+        if (stripos($os, 'WIN') === 0 || stripos($os, 'Windows') !== false) {
+            return self::PLATFORM_WINDOWS;
         }
 
         // Default to Linux for Unix-like systems

@@ -39,7 +39,7 @@ class PlatformDetector
      */
     public static function getArchitecture(): string
     {
-        $machine = php_uname('m');
+        $machine = strtolower(php_uname('m'));
 
         return match (true) {
             in_array($machine, ['x86_64', 'amd64', 'x64'], true) => self::ARCH_X86_64,

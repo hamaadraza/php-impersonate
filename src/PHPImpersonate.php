@@ -562,6 +562,7 @@ class PHPImpersonate implements ClientInterface
 
         if (PlatformDetector::isWindows()) {
             $options['ca-native'] = true;
+
             return;
         }
 
@@ -572,6 +573,7 @@ class PHPImpersonate implements ClientInterface
             if (file_exists($macCertPath) && is_readable($macCertPath)) {
                 $options['cacert'] = $macCertPath;
             }
+
             return;
         }
 

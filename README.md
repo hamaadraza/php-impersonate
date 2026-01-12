@@ -4,15 +4,6 @@
 
 A PHP library for making HTTP requests with browser impersonation. This library uses curl-impersonate to mimic various browsers' network signatures, making it useful for accessing websites that may detect and block automated requests.
 
-## Platform Requirements
-
-**IMPORTANT**: This package works on Linux and Windows platforms. macOS support is planned for future releases.
-
-### Supported Platforms:
-- **Linux**: Full support with native binaries
-- **Windows**: Full support with Windows binaries (.bat files)
-- **macOS**: Not yet supported (planned for future releases)
-
 ## Installation
 
 Install via Composer:

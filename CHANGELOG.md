@@ -2,6 +2,14 @@
 
 All notable changes to `php-impersonate` will be documented in this file.
 
+## v1.0.7 - 2026-01-12
+
+### What's Changed
+
+* build(deps): bump dependabot/fetch-metadata from 2.4.0 to 2.5.0 by @dependabot[bot] in https://github.com/hamaadraza/php-impersonate/pull/15
+
+**Full Changelog**: https://github.com/hamaadraza/php-impersonate/compare/v1.0.5...v1.0.7
+
 ## v1.0.5 - 2026-01-12
 
 **Full Changelog**: https://github.com/hamaadraza/php-impersonate/compare/v1.0.4...v1.0.5

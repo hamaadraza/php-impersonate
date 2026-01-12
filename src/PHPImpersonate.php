@@ -536,9 +536,8 @@ class PHPImpersonate implements ClientInterface
             'X' => $method, // HTTP method
         ];
 
-        if (PlatformDetector::isWindows()) {
-            $options['ca-native'] = true;
-        }
+        // Handle SSL CA certificates based on platform
+        $this->addSslCertOptions($options);
 
         // Add headers
         if (! empty($headers)) {
@@ -548,6 +547,73 @@ class PHPImpersonate implements ClientInterface
         }
 
         return $options;
+    }
+
+    /**
+     * Add SSL certificate options based on platform
+     * curl-impersonate uses BoringSSL which doesn't auto-detect system CA certs on Linux
+     */
+    private function addSslCertOptions(array &$options): void
+    {
+        // Check if user has already specified cacert in curlOptions
+        if (isset($this->curlOptions['cacert']) || isset($this->curlOptions['capath'])) {
+            return;
+        }
+
+        if (PlatformDetector::isWindows()) {
+            $options['ca-native'] = true;
+            return;
+        }
+
+        if (PlatformDetector::isMacOS()) {
+            // macOS typically has certs in a standard location that curl-impersonate can find
+            // but we'll add the common path as fallback
+            $macCertPath = '/etc/ssl/cert.pem';
+            if (file_exists($macCertPath) && is_readable($macCertPath)) {
+                $options['cacert'] = $macCertPath;
+            }
+            return;
+        }
+
+        // Linux: curl-impersonate with BoringSSL needs explicit CA cert path
+        $caCertPath = $this->findLinuxCaCertBundle();
+        if ($caCertPath !== null) {
+            $options['cacert'] = $caCertPath;
+        }
+    }
+
+    /**
+     * Find the CA certificate bundle on Linux systems
+     * Different distros store certs in different locations
+     */
+    private function findLinuxCaCertBundle(): ?string
+    {
+        // Common CA certificate bundle locations on Linux
+        $possiblePaths = [
+            '/etc/ssl/certs/ca-certificates.crt',      // Debian/Ubuntu/Gentoo
+            '/etc/pki/tls/certs/ca-bundle.crt',        // RHEL/CentOS/Fedora
+            '/etc/ssl/ca-bundle.pem',                   // openSUSE
+            '/etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem', // CentOS/RHEL 7+
+            '/etc/ssl/certs/ca-bundle.crt',            // Some distros
+            '/var/lib/ca-certificates/ca-bundle.pem',  // Some distros
+            '/etc/ssl/cert.pem',                        // Alpine/BSD-like
+            '/usr/local/share/certs/ca-root-nss.crt',  // FreeBSD
+            '/etc/pki/tls/cert.pem',                   // Fedora/RHEL alternative
+        ];
+
+        foreach ($possiblePaths as $path) {
+            if (file_exists($path) && is_readable($path)) {
+                return $path;
+            }
+        }
+
+        // Try the SSL_CERT_FILE environment variable as last resort
+        $envCertFile = getenv('SSL_CERT_FILE');
+        if ($envCertFile !== false && file_exists($envCertFile) && is_readable($envCertFile)) {
+            return $envCertFile;
+        }
+
+        return null;
     }
 
     /**

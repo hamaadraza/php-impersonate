@@ -268,12 +268,32 @@ class PHPImpersonate implements ClientInterface
      */
     private function validatePlatform(): void
     {
-        if (! PlatformDetector::isSupported()) {
-            $platform = PlatformDetector::getPlatform();
+        $platform = PlatformDetector::getPlatform();
+        $arch = PlatformDetector::getArchitecture();
 
+        // Check if platform is supported
+        $supportedPlatforms = [
+            PlatformDetector::PLATFORM_LINUX,
+            PlatformDetector::PLATFORM_WINDOWS,
+            PlatformDetector::PLATFORM_MACOS,
+        ];
+
+        if (! in_array($platform, $supportedPlatforms, true)) {
             throw new PlatformNotSupportedException(
                 $platform,
-                [PlatformDetector::PLATFORM_LINUX, PlatformDetector::PLATFORM_WINDOWS]
+                $supportedPlatforms
+            );
+        }
+
+        // Check if architecture is supported
+        $supportedArchitectures = PlatformDetector::getSupportedArchitectures();
+
+        if ($arch === PlatformDetector::ARCH_UNKNOWN) {
+            throw new PlatformNotSupportedException(
+                $platform,
+                $supportedPlatforms,
+                php_uname('m'),
+                $supportedArchitectures
             );
         }
     }

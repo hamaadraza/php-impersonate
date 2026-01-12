@@ -64,19 +64,10 @@ class Browser implements BrowserInterface
     private function resolveExecutablePath(): void
     {
         $platform = PlatformDetector::getPlatform();
-        $binaryDir = PlatformDetector::getBinaryDir();
+        $binaryFile = $this->getBinaryFileName($platform);
 
-        // Look for the main curl-impersonate binary
-        $binaryFile = $platform === PlatformDetector::PLATFORM_WINDOWS ? 'curl.exe' : 'curl-impersonate';
-
-        $paths = array_filter([
-            // Package bin directory
-            $this->buildPath(__DIR__ . "/../../{$binaryDir}", $binaryFile),
-            // Vendor bin directory
-            $this->buildPath(__DIR__ . "/../../../../{$binaryDir}", $binaryFile),
-            // Platform-specific global paths
-            ...$this->getSystemPaths($platform, $binaryFile),
-        ]);
+        // Get all paths to check (with fallbacks for backwards compatibility)
+        $paths = $this->getAllPossiblePaths($binaryFile);
 
         foreach ($paths as $path) {
             if ($this->isUsableExecutable($path, $platform)) {
@@ -97,10 +88,52 @@ class Browser implements BrowserInterface
         }
 
         throw new RuntimeException(sprintf(
-            "curl-impersonate binary not found on %s. Checked paths: %s",
-            $platform,
-            implode(', ', $paths)
+            "curl-impersonate binary not found for %s. Checked paths: %s",
+            PlatformDetector::getPlatformDescription(),
+            implode(', ', array_filter($paths))
         ));
+    }
+
+    /**
+     * Get the binary file name for the platform
+     */
+    private function getBinaryFileName(string $platform): string
+    {
+        return match ($platform) {
+            PlatformDetector::PLATFORM_WINDOWS => 'curl.exe',
+            default => 'curl-impersonate',
+        };
+    }
+
+    /**
+     * Get all possible paths to check for the binary
+     */
+    private function getAllPossiblePaths(string $binaryFile): array
+    {
+        $platform = PlatformDetector::getPlatform();
+        $paths = [];
+
+        // Get fallback directories (includes primary and legacy paths)
+        $binaryDirs = Configuration::getBinaryDirFallbacks();
+
+        foreach ($binaryDirs as $binaryDir) {
+            // Package bin directory (when installed as dependency)
+            $packagePath = $this->buildPath(__DIR__ . "/../../{$binaryDir}", $binaryFile);
+            if ($packagePath) {
+                $paths[] = $packagePath;
+            }
+
+            // Vendor bin directory (alternative location)
+            $vendorPath = $this->buildPath(__DIR__ . "/../../../../{$binaryDir}", $binaryFile);
+            if ($vendorPath) {
+                $paths[] = $vendorPath;
+            }
+        }
+
+        // Add system paths
+        $paths = array_merge($paths, $this->getSystemPaths($platform, $binaryFile));
+
+        return array_filter($paths);
     }
 
     /**
@@ -120,6 +153,7 @@ class Browser implements BrowserInterface
     {
         return match ($platform) {
             PlatformDetector::PLATFORM_LINUX => ["/usr/local/bin/{$binaryFile}", $binaryFile],
+            PlatformDetector::PLATFORM_MACOS => ["/usr/local/bin/{$binaryFile}", "/opt/homebrew/bin/{$binaryFile}", $binaryFile],
             PlatformDetector::PLATFORM_WINDOWS => [$binaryFile],
             default => [$binaryFile],
         };

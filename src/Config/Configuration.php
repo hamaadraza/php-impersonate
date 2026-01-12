@@ -8,7 +8,6 @@ class Configuration
 {
     private static array $platformConfigs = [
         PlatformDetector::PLATFORM_LINUX => [
-            'binary_dir' => 'bin/linux',
             'file_extension' => '',
             'command_separator' => '\\',
             'path_separator' => '/',
@@ -17,8 +16,7 @@ class Configuration
             'temp_dir' => null, // Use system default
         ],
         PlatformDetector::PLATFORM_WINDOWS => [
-            'binary_dir' => 'bin/windows',
-            'file_extension' => '.bat',
+            'file_extension' => '.exe',
             'command_separator' => '^',
             'path_separator' => '\\',
             'executable_check' => 'file_exists', // Windows doesn't have is_executable
@@ -26,7 +24,6 @@ class Configuration
             'temp_dir' => null, // Use system default
         ],
         PlatformDetector::PLATFORM_MACOS => [
-            'binary_dir' => 'bin/macos',
             'file_extension' => '',
             'command_separator' => '\\',
             'path_separator' => '/',
@@ -49,11 +46,30 @@ class Configuration
     /**
      * Get a specific configuration value for the current platform
      */
-    public static function get(string $key)
+    public static function get(string $key): mixed
     {
         $config = self::getPlatformConfig();
 
         return $config[$key] ?? null;
+    }
+
+    /**
+     * Get the binary directory for the current platform and architecture
+     */
+    public static function getBinaryDir(): string
+    {
+        return PlatformDetector::getBinaryDir();
+    }
+
+    /**
+     * Get fallback binary directories for the current platform
+     */
+    public static function getBinaryDirFallbacks(): array
+    {
+        return array_map(
+            fn($suffix) => "bin/{$suffix}",
+            PlatformDetector::getBinaryDirFallbacks()
+        );
     }
 
     /**

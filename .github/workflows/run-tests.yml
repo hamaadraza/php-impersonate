@@ -29,10 +29,7 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # Linux x86_64
-          - os: ubuntu-latest
-            php: '8.1'
-            name: 'Linux x86_64 (PHP 8.1)'
+          # Linux x86_64 (Pest 3.0 requires PHP 8.2+)
           - os: ubuntu-latest
             php: '8.2'
             name: 'Linux x86_64 (PHP 8.2)'
@@ -48,12 +45,7 @@ jobs:
             php: '8.3'
             name: 'Windows x86_64 (PHP 8.3)'
             
-          # macOS Intel (x86_64)
-          - os: macos-13
-            php: '8.3'
-            name: 'macOS Intel x86_64 (PHP 8.3)'
-            
-          # macOS Apple Silicon (ARM64)
+          # macOS Apple Silicon (ARM64) - Primary macOS target
           - os: macos-latest
             php: '8.3'
             name: 'macOS ARM64 Apple Silicon (PHP 8.3)'
@@ -83,6 +75,7 @@ jobs:
         run: composer show -D
 
       - name: Debug - Show platform info
+        shell: bash
         run: |
           php -r 'echo "OS: " . PHP_OS . PHP_EOL . "Arch: " . php_uname("m") . PHP_EOL;'
 
@@ -93,7 +86,7 @@ jobs:
   # Docker Testing for Linux ARM64 & Alpine
   # Note: QEMU emulation can be slow and may cause intermittent failures
   # ===========================================
-  test-docker-arm64:
+  test-docker:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     strategy:
@@ -129,6 +122,8 @@ jobs:
             -w /app \
             ${{ matrix.image }} \
             sh -c '
+              set -e
+              
               # Install dependencies based on distro
               if command -v apk > /dev/null; then
                 apk add --no-cache git unzip curl
@@ -145,9 +140,9 @@ jobs:
               
               # Show platform info
               echo "=== Platform Info ==="
-              echo "OS: $(php -r \"echo PHP_OS;\")"
-              echo "Arch: $(php -r \"echo php_uname(\\\"m\\\");\")"
               php -r "
+                echo \"OS: \" . PHP_OS . PHP_EOL;
+                echo \"Arch: \" . php_uname(\"m\") . PHP_EOL;
                 require \"vendor/autoload.php\";
                 use Raza\PHPImpersonate\Platform\PlatformDetector;
                 echo \"Platform: \" . PlatformDetector::getPlatform() . PHP_EOL;

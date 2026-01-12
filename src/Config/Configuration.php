@@ -67,7 +67,7 @@ class Configuration
     public static function getBinaryDirFallbacks(): array
     {
         return array_map(
-            fn($suffix) => "bin/{$suffix}",
+            fn ($suffix) => "bin/{$suffix}",
             PlatformDetector::getBinaryDirFallbacks()
         );
     }

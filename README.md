@@ -15,7 +15,6 @@ composer require hamaadraza/php-impersonate
 ## System Requirements
 
 - PHP 8.0 or higher
-- Linux or Windows operating system
 
 ## Basic Usage
 
@@ -252,6 +251,8 @@ $response = PHPImpersonate::post('https://example.com/api',
 );
 ```
 
+For PUT and PATCH requests, JSON is used as the default format.
+
 ## Testing
 
 Run the test suite:
@@ -259,8 +260,6 @@ Run the test suite:
 ```bash
 composer test
 ```
-
-For PUT and PATCH requests, JSON is used as the default format.
 
 ## License
 

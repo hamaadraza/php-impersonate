@@ -8,19 +8,57 @@ on:
       - 'phpunit.xml.dist'
       - 'composer.json'
       - 'composer.lock'
+      - 'bin/**'
+  pull_request:
+    paths:
+      - '**.php'
+      - '.github/workflows/run-tests.yml'
+      - 'phpunit.xml.dist'
+      - 'composer.json'
+      - 'composer.lock'
+      - 'bin/**'
 
 jobs:
-  test:
+  # ===========================================
+  # Native OS Testing (x86_64 and ARM64)
+  # ===========================================
+  test-native:
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 5
+    timeout-minutes: 15
     strategy:
-      fail-fast: true
+      fail-fast: false
       matrix:
-        os: [ubuntu-latest]
-        php: [8.3]
-        stability: [prefer-lowest, prefer-stable]
+        include:
+          # Linux x86_64
+          - os: ubuntu-latest
+            php: '8.1'
+            name: 'Linux x86_64 (PHP 8.1)'
+          - os: ubuntu-latest
+            php: '8.2'
+            name: 'Linux x86_64 (PHP 8.2)'
+          - os: ubuntu-latest
+            php: '8.3'
+            name: 'Linux x86_64 (PHP 8.3)'
+          - os: ubuntu-latest
+            php: '8.4'
+            name: 'Linux x86_64 (PHP 8.4)'
+            
+          # Windows x86_64
+          - os: windows-latest
+            php: '8.3'
+            name: 'Windows x86_64 (PHP 8.3)'
+            
+          # macOS Intel (x86_64)
+          - os: macos-13
+            php: '8.3'
+            name: 'macOS Intel x86_64 (PHP 8.3)'
+            
+          # macOS Apple Silicon (ARM64)
+          - os: macos-latest
+            php: '8.3'
+            name: 'macOS ARM64 Apple Silicon (PHP 8.3)'
 
-    name: P${{ matrix.php }} - ${{ matrix.stability }} - ${{ matrix.os }}
+    name: ${{ matrix.name }}
 
     steps:
       - name: Checkout code
@@ -30,7 +68,7 @@ jobs:
         uses: shivammathur/setup-php@v2
         with:
           php-version: ${{ matrix.php }}
-          extensions: dom, curl, libxml, mbstring, zip, pcntl, pdo, sqlite, pdo_sqlite, bcmath, soap, intl, gd, exif, iconv, imagick, fileinfo
+          extensions: dom, curl, libxml, mbstring, zip, pcntl, bcmath, soap, intl, fileinfo
           coverage: none
 
       - name: Setup problem matchers
@@ -39,13 +77,114 @@ jobs:
           echo "::add-matcher::${{ runner.tool_cache }}/phpunit.json"
 
       - name: Install dependencies
-        run: composer update --${{ matrix.stability }} --prefer-dist --no-interaction
+        run: composer install --prefer-dist --no-interaction
 
       - name: List Installed Dependencies
         run: composer show -D
 
-      - name: Update Bin Directory permissions
-        run: find bin -type f -exec chmod +x {} \;
+      - name: Debug - Show platform info
+        run: php -r "echo 'OS: ' . PHP_OS . PHP_EOL . 'Arch: ' . php_uname('m') . PHP_EOL;"
+
+      - name: Execute tests
+        run: vendor/bin/pest --ci
+
+  # ===========================================
+  # Docker Testing for Linux ARM64 & Alpine
+  # ===========================================
+  test-docker-arm64:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: linux/arm64
+            image: php:8.3-cli
+            name: 'Linux ARM64 (glibc)'
+          - platform: linux/arm64
+            image: php:8.3-cli-alpine
+            name: 'Linux ARM64 Alpine (musl)'
+          - platform: linux/amd64
+            image: php:8.3-cli-alpine
+            name: 'Linux x86_64 Alpine (musl)'
+
+    name: Docker - ${{ matrix.name }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Run tests in Docker
+        run: |
+          docker run --rm --platform ${{ matrix.platform }} \
+            -v "${{ github.workspace }}:/app" \
+            -w /app \
+            ${{ matrix.image }} \
+            sh -c '
+              # Install dependencies based on distro
+              if command -v apk > /dev/null; then
+                apk add --no-cache git unzip curl
+              else
+                apt-get update && apt-get install -y git unzip curl libzip-dev
+                docker-php-ext-install zip
+              fi
+              
+              # Install composer
+              curl -sS https://getcomposer.org/installer | php -- --install-dir=/usr/local/bin --filename=composer
+              
+              # Install dependencies
+              composer install --prefer-dist --no-interaction
+              
+              # Show platform info
+              echo "=== Platform Info ==="
+              echo "OS: $(php -r \"echo PHP_OS;\")"
+              echo "Arch: $(php -r \"echo php_uname(\\\"m\\\");\")"
+              php -r "
+                require \"vendor/autoload.php\";
+                use Raza\PHPImpersonate\Platform\PlatformDetector;
+                echo \"Platform: \" . PlatformDetector::getPlatform() . PHP_EOL;
+                echo \"Architecture: \" . PlatformDetector::getArchitecture() . PHP_EOL;
+                echo \"Libc: \" . PlatformDetector::getLibcType() . PHP_EOL;
+                echo \"Binary Dir: \" . PlatformDetector::getBinaryDir() . PHP_EOL;
+              "
+              echo "===================="
+              
+              # Run tests
+              vendor/bin/pest --ci
+            '
+
+  # ===========================================
+  # Dependency Stability Testing
+  # ===========================================
+  test-stability:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        stability: [prefer-lowest, prefer-stable]
+
+    name: Stability - ${{ matrix.stability }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          extensions: dom, curl, libxml, mbstring, zip, pcntl, bcmath, soap, intl, fileinfo
+          coverage: none
+
+      - name: Install dependencies
+        run: composer update --${{ matrix.stability }} --prefer-dist --no-interaction
 
       - name: Execute tests
         run: vendor/bin/pest --ci

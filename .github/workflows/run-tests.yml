@@ -83,7 +83,8 @@ jobs:
         run: composer show -D
 
       - name: Debug - Show platform info
-        run: php -r "echo \"OS: \" . PHP_OS . PHP_EOL . \"Arch: \" . php_uname(\"m\") . PHP_EOL;"
+        run: |
+          php -r 'echo "OS: " . PHP_OS . PHP_EOL . "Arch: " . php_uname("m") . PHP_EOL;'
 
       - name: Execute tests
         run: vendor/bin/pest --ci

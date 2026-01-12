@@ -53,7 +53,14 @@
     "php": ">=8.0"
   },
   "bin": [
-    "bin/linux/curl-impersonate",
-    "bin/windows/curl.exe"
+    "bin/linux-x86_64/curl-impersonate",
+    "bin/linux-aarch64/curl-impersonate",
+    "bin/linux-x86_64-musl/curl-impersonate",
+    "bin/linux-aarch64-musl/curl-impersonate",
+    "bin/macos-x86_64/curl-impersonate",
+    "bin/macos-aarch64/curl-impersonate",
+    "bin/windows-x86_64/curl.exe",
+    "bin/windows-x86_64/libcurl.dll",
+    "bin/windows-x86_64/zlib.dll"
   ]
 }

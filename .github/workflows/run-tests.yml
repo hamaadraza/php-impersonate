@@ -83,17 +83,18 @@ jobs:
         run: composer show -D
 
       - name: Debug - Show platform info
-        run: php -r "echo 'OS: ' . PHP_OS . PHP_EOL . 'Arch: ' . php_uname('m') . PHP_EOL;"
+        run: php -r "echo \"OS: \" . PHP_OS . PHP_EOL . \"Arch: \" . php_uname(\"m\") . PHP_EOL;"
 
       - name: Execute tests
         run: vendor/bin/pest --ci
 
   # ===========================================
   # Docker Testing for Linux ARM64 & Alpine
+  # Note: QEMU emulation can be slow and may cause intermittent failures
   # ===========================================
   test-docker-arm64:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:

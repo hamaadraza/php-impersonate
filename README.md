@@ -174,6 +174,75 @@ $response = PHPImpersonate::get('https://example.com', [], 5);
 $client = new PHPImpersonate('chrome107', 10); // 10-second timeout
 ```
 
+## Proxy Configuration
+
+You can route requests through a proxy server using the `curlOptions` parameter:
+
+### Basic Proxy Usage
+
+```php
+use Raza\PHPImpersonate\PHPImpersonate;
+
+$client = new PHPImpersonate(
+    browser: 'chrome136',
+    timeout: 30,
+    curlOptions: [
+        'proxy' => 'http://127.0.0.1:8080',  // HTTP proxy
+        'proxy-user' => 'user:password',    // optional authentication
+    ]
+);
+
+$response = $client->sendGet('https://api.ipify.org?format=json');
+
+echo $response->body();
+```
+
+### Proxy Options
+
+The following proxy-related curl options are supported:
+
+| Option | Description | Example |
+|--------|-------------|---------|
+| `proxy` | Proxy server address | `'http://127.0.0.1:8080'` or `'http://proxy.example.com:3128'` |
+| `proxy-user` | Proxy authentication credentials | `'username:password'` |
+
+### SOCKS Proxy
+
+You can also use SOCKS proxies by specifying the protocol:
+
+```php
+$client = new PHPImpersonate(
+    browser: 'chrome136',
+    timeout: 30,
+    curlOptions: [
+        'proxy' => 'socks5://127.0.0.1:1080',    // SOCKS5 proxy
+    ]
+);
+```
+
+### Using Proxy with Static Methods
+
+For one-off requests with a proxy, create an instance and use the instance methods:
+
+```php
+$client = new PHPImpersonate(
+    browser: 'chrome136',
+    timeout: 30,
+    curlOptions: [
+        'proxy' => 'http://proxy.example.com:8080',
+        'proxy-user' => 'user:pass',
+    ]
+);
+
+// GET request through proxy
+$response = $client->sendGet('https://example.com');
+
+// POST request through proxy
+$response = $client->sendPost('https://example.com/api', [
+    'key' => 'value'
+]);
+```
+
 ## Advanced Examples
 
 ### JSON API Request

@@ -505,25 +505,26 @@ class PHPImpersonate implements ClientInterface
     }
 
     /**
-     * Extract HTTP status code from response headers
+     * Extract HTTP status code from response headers.
+     *
+     * @param array<string, string[]> $headers
      */
     private function extractStatusFromHeaders(array $headers): string
     {
-        // Look for the HTTP status line we captured
-        if (isset($headers['HTTP_STATUS'])) {
-            if (preg_match('/(\d{3})/', $headers['HTTP_STATUS'], $matches)) {
+        if (isset($headers['HTTP_STATUS'][0])) {
+            if (preg_match('/(\d{3})/', $headers['HTTP_STATUS'][0], $matches)) {
                 return $matches[1];
             }
         }
 
-        // Fallback: check if we have any header that might contain status info
-        foreach ($headers as $name => $value) {
-            if (preg_match('/HTTP\/\d\.\d\s+(\d+)/', $value, $matches)) {
-                return $matches[1];
+        foreach ($headers as $values) {
+            foreach ($values as $value) {
+                if (preg_match('/HTTP\/\d\.\d\s+(\d+)/', $value, $matches)) {
+                    return $matches[1];
+                }
             }
         }
 
-        // Default to 200 if we can't determine
         return '200';
     }
 
@@ -940,7 +941,13 @@ class PHPImpersonate implements ClientInterface
     }
 
     /**
-     * Parse response headers with improved handling
+     * Parse response headers, preserving all values for duplicate header names.
+     *
+     * Per RFC 9110 §5.3, multiple fields with the same name are valid.
+     * Set-Cookie in particular must never be comma-joined (RFC 6265 §4.1.1),
+     * so we always store values as string[] lists.
+     *
+     * @return array<string, string[]>
      */
     private function parseHeaders(string $headersContent): array
     {
@@ -948,42 +955,40 @@ class PHPImpersonate implements ClientInterface
             return [];
         }
 
+        /** @var array<string, string[]> $headers */
         $headers = [];
 
-        // Handle multiple HTTP responses (redirects)
+        // Handle multiple HTTP responses (redirects) — keep only the final block.
         $sections = preg_split('/\r?\n\r?\n/', trim($headersContent));
 
         if (! $sections) {
             return [];
         }
 
-        // Get the last response headers
         $lastSection = end($sections);
         $lines = explode("\n", $lastSection);
 
         foreach ($lines as $line) {
             $line = trim($line);
 
-            // Skip empty lines
             if (empty($line)) {
                 continue;
             }
 
-            // Capture HTTP status line
+            // Capture HTTP status line as a single-element list for type consistency.
             if (str_starts_with($line, 'HTTP/')) {
-                $headers['HTTP_STATUS'] = $line;
+                $headers['HTTP_STATUS'] = [$line];
 
                 continue;
             }
 
-            // Parse header line
             $colonPos = strpos($line, ':');
             if ($colonPos !== false) {
                 $name = trim(substr($line, 0, $colonPos));
                 $value = trim(substr($line, $colonPos + 1));
 
                 if (! empty($name)) {
-                    $headers[$name] = $value;
+                    $headers[$name][] = $value;
                 }
             }
         }

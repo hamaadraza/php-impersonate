@@ -103,21 +103,77 @@ $response->body(): string
 // Check if the response was successful (status code 200-299)
 $response->isSuccess(): bool
 
-// Parse the JSON response
-$response->json(): array|null
+// Parse the response body as JSON (throws \JsonException on failure)
+$response->json(bool $associative = true, int $depth = 512, int $flags = 0): mixed
 
-// Get a specific header value
+// Check whether a header is present (case-insensitive)
+$response->hasHeader(string $name): bool
+
+// Get the first value of a header (case-insensitive), or $default when absent
 $response->header(string $name, ?string $default = null): ?string
 
-// Get all headers
-$response->headers(): array
+// Get ALL values of a header — use this for Set-Cookie and other repeatable headers
+$response->headerAll(string $name): string[]
 
-// Dump information about the response (returns string)
+// Get all headers as a map of name → list of values
+$response->headers(): array<string, string[]>
+
+// Serialise to a plain array
+$response->toArray(): array
+
+// Dump response details to a string (for logging)
 $response->dump(): string
 
-// Output debug information about the response (echoes and returns self)
+// Print response details and return self (for debugging)
 $response->debug(): Response
 ```
+
+### Working with Headers
+
+Most headers have a single value, so `header()` is all you need:
+
+```php
+$contentType = $response->header('Content-Type');         // 'application/json'
+$etag        = $response->header('ETag', 'none');         // fallback to 'none'
+
+if ($response->hasHeader('X-Rate-Limit-Remaining')) {
+    $remaining = $response->header('X-Rate-Limit-Remaining');
+}
+```
+
+Some headers are legitimately repeated by the server — most commonly `Set-Cookie`.
+Per [RFC 6265 §4.1.1](https://www.rfc-editor.org/rfc/rfc6265#section-4.1.1), cookie values
+must **not** be folded into a single comma-separated string, so `header('Set-Cookie')` would
+silently drop all but the first cookie. Use `headerAll()` instead:
+
+```php
+$cookies = $response->headerAll('Set-Cookie');
+// ['sessionid=abc; Path=/; HttpOnly', 'csrftoken=xyz; Path=/; SameSite=Lax']
+
+foreach ($cookies as $cookie) {
+    echo $cookie . "\n";
+}
+```
+
+`headers()` returns the full map when you need to inspect everything at once:
+
+```php
+$allHeaders = $response->headers();
+// [
+//     'Content-Type' => ['application/json'],
+//     'Set-Cookie'   => ['sessionid=abc; Path=/; HttpOnly', 'csrftoken=xyz; Path=/'],
+//     'Cache-Control'=> ['no-cache, no-store'],
+// ]
+
+foreach ($response->headers() as $name => $values) {
+    // $values is always an array, even for single-value headers
+    foreach ($values as $value) {
+        echo "$name: $value\n";
+    }
+}
+```
+
+**Key point:** Each header name maps to an **array of values** (`string[]`), not a single string. This correctly handles HTTP responses where headers like `Set-Cookie` can appear multiple times.
 
 ## Browser Options
 
@@ -158,7 +214,7 @@ PHP-Impersonate supports mimicking various browsers:
 Example:
 ```php
 // Create a client that mimics Firefox
-$client = new PHPImpersonate('firefox105');
+$client = new PHPImpersonate('firefox135');
 $response = $client->sendGet('https://example.com');
 ```
 

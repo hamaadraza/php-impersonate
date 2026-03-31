@@ -3,8 +3,8 @@
 namespace Raza\PHPImpersonate\Tests;
 
 use PHPUnit\Framework\TestCase;
-use PHPUnit\Framework\Attributes\DataProvider;
 use Raza\PHPImpersonate\Response;
+use PHPUnit\Framework\Attributes\DataProvider;
 
 class ResponseTest extends TestCase
 {
@@ -31,7 +31,7 @@ class ResponseTest extends TestCase
     {
         $response = $this->makeResponse([
             'Content-Type' => ['application/json'],
-            'Set-Cookie'   => ['sessionid=abc; Path=/; HttpOnly', 'csrftoken=xyz; Path=/'],
+            'Set-Cookie' => ['sessionid=abc; Path=/; HttpOnly', 'csrftoken=xyz; Path=/'],
         ]);
 
         $headers = $response->headers();
@@ -53,7 +53,7 @@ class ResponseTest extends TestCase
     {
         $response = $this->makeResponse([
             'Content-Length' => ['512'],
-            'X-Custom'       => ['value'],
+            'X-Custom' => ['value'],
         ]);
 
         foreach ($response->headers() as $values) {
@@ -289,7 +289,7 @@ class ResponseTest extends TestCase
     {
         $response = $this->makeResponse([
             'Content-Type' => ['application/json'],
-            'Set-Cookie'   => ['a=1', 'b=2'],
+            'Set-Cookie' => ['a=1', 'b=2'],
         ]);
 
         foreach ($response->toArray()['headers'] as $values) {
@@ -320,9 +320,9 @@ class ResponseTest extends TestCase
     public static function successfulStatusCodeProvider(): array
     {
         return [
-            'OK'         => [200],
-            'Created'    => [201],
-            'Accepted'   => [202],
+            'OK' => [200],
+            'Created' => [201],
+            'Accepted' => [202],
             'No Content' => [204],
         ];
     }
@@ -336,11 +336,11 @@ class ResponseTest extends TestCase
     public static function failedStatusCodeProvider(): array
     {
         return [
-            'Bad Request'          => [400],
-            'Unauthorized'         => [401],
-            'Not Found'            => [404],
-            'Internal Server Error'=> [500],
-            'Redirect'             => [302],
+            'Bad Request' => [400],
+            'Unauthorized' => [401],
+            'Not Found' => [404],
+            'Internal Server Error' => [500],
+            'Redirect' => [302],
         ];
     }
 

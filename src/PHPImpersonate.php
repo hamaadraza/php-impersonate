@@ -2,15 +2,18 @@
 
 namespace Raza\PHPImpersonate;
 
+use RuntimeException;
 use InvalidArgumentException;
 use Raza\PHPImpersonate\Browser\Browser;
-use Raza\PHPImpersonate\Browser\BrowserInterface;
-use Raza\PHPImpersonate\Exception\PlatformNotSupportedException;
-use Raza\PHPImpersonate\Exception\RequestException;
 use Raza\PHPImpersonate\Platform\CommandBuilder;
+use Raza\PHPImpersonate\Browser\BrowserInterface;
 use Raza\PHPImpersonate\Platform\PlatformDetector;
-use RuntimeException;
+use Raza\PHPImpersonate\Exception\RequestException;
+use Raza\PHPImpersonate\Exception\PlatformNotSupportedException;
 
+/**
+ * @phpstan-type BrowserName 'chrome99'|'chrome99_android'|'chrome100'|'chrome101'|'chrome104'|'chrome107'|'chrome110'|'chrome116'|'chrome119'|'chrome120'|'chrome123'|'chrome124'|'chrome131'|'chrome131_android'|'chrome133a'|'chrome136'|'edge99'|'edge101'|'firefox133'|'firefox135'|'safari153'|'safari155'|'safari170'|'safari172_ios'|'safari180'|'safari180_ios'|'safari184'|'safari184_ios'|'safari260'|'safari260_ios'|'tor145'
+ */
 class PHPImpersonate implements ClientInterface
 {
     private const DEFAULT_BROWSER = 'chrome99_android';
@@ -23,7 +26,13 @@ class PHPImpersonate implements ClientInterface
     private array $tempFiles = [];
 
     /**
-     * @param string|BrowserInterface $browser Browser to use (name or browser instance)
+     * @param BrowserName|BrowserInterface $browser Browser to use (name or browser instance).
+     *                                               Available browsers: chrome99, chrome99_android, chrome100, chrome101,
+     *                                               chrome104, chrome107, chrome110, chrome116, chrome119, chrome120,
+     *                                               chrome123, chrome124, chrome131, chrome131_android, chrome133a,
+     *                                               chrome136, edge99, edge101, firefox133, firefox135, safari153,
+     *                                               safari155, safari170, safari172_ios, safari180, safari180_ios,
+     *                                               safari184, safari184_ios, safari260, safari260_ios, tor145
      * @param int $timeout Request timeout in seconds
      * @param array<string,mixed> $curlOptions Custom curl options
      * @throws RequestException If the browser is invalid or platform is not supported
@@ -175,6 +184,9 @@ class PHPImpersonate implements ClientInterface
     }
 
     // Static convenience methods
+    /**
+     * @param BrowserName $browser Browser name (see BrowserName constants or constructor docblock)
+     */
     public static function get(
         string $url,
         array $headers = [],
@@ -185,6 +197,9 @@ class PHPImpersonate implements ClientInterface
         return (new self($browser, $timeout, $curlOptions))->sendGet($url, $headers);
     }
 
+    /**
+     * @param BrowserName $browser Browser name (see BrowserName constants or constructor docblock)
+     */
     public static function post(
         string $url,
         ?array $data = null,
@@ -196,6 +211,9 @@ class PHPImpersonate implements ClientInterface
         return (new self($browser, $timeout, $curlOptions))->sendPost($url, $data, $headers);
     }
 
+    /**
+     * @param BrowserName $browser Browser name (see BrowserName constants or constructor docblock)
+     */
     public static function head(
         string $url,
         array $headers = [],
@@ -206,6 +224,9 @@ class PHPImpersonate implements ClientInterface
         return (new self($browser, $timeout, $curlOptions))->sendHead($url, $headers);
     }
 
+    /**
+     * @param BrowserName $browser Browser name (see BrowserName constants or constructor docblock)
+     */
     public static function delete(
         string $url,
         array $headers = [],
@@ -216,6 +237,9 @@ class PHPImpersonate implements ClientInterface
         return (new self($browser, $timeout, $curlOptions))->sendDelete($url, $headers);
     }
 
+    /**
+     * @param BrowserName $browser Browser name (see BrowserName constants or constructor docblock)
+     */
     public static function patch(
         string $url,
         ?array $data = null,
@@ -227,6 +251,9 @@ class PHPImpersonate implements ClientInterface
         return (new self($browser, $timeout, $curlOptions))->sendPatch($url, $data, $headers);
     }
 
+    /**
+     * @param BrowserName $browser Browser name (see BrowserName constants or constructor docblock)
+     */
     public static function put(
         string $url,
         ?array $data = null,
@@ -260,12 +287,32 @@ class PHPImpersonate implements ClientInterface
      */
     private function validatePlatform(): void
     {
-        if (! PlatformDetector::isSupported()) {
-            $platform = PlatformDetector::getPlatform();
+        $platform = PlatformDetector::getPlatform();
+        $arch = PlatformDetector::getArchitecture();
 
+        // Check if platform is supported
+        $supportedPlatforms = [
+            PlatformDetector::PLATFORM_LINUX,
+            PlatformDetector::PLATFORM_WINDOWS,
+            PlatformDetector::PLATFORM_MACOS,
+        ];
+
+        if (! in_array($platform, $supportedPlatforms, true)) {
             throw new PlatformNotSupportedException(
                 $platform,
-                [PlatformDetector::PLATFORM_LINUX, PlatformDetector::PLATFORM_WINDOWS]
+                $supportedPlatforms
+            );
+        }
+
+        // Check if architecture is supported
+        $supportedArchitectures = PlatformDetector::getSupportedArchitectures();
+
+        if ($arch === PlatformDetector::ARCH_UNKNOWN) {
+            throw new PlatformNotSupportedException(
+                $platform,
+                $supportedPlatforms,
+                php_uname('m'),
+                $supportedArchitectures
             );
         }
     }
@@ -574,9 +621,8 @@ class PHPImpersonate implements ClientInterface
             'X' => $method, // HTTP method
         ];
 
-        if (PlatformDetector::isWindows()) {
-            $options['ca-native'] = true;
-        }
+        // Handle SSL CA certificates based on platform
+        $this->addSslCertOptions($options);
 
         // Add headers
         if (! empty($headers)) {
@@ -586,6 +632,75 @@ class PHPImpersonate implements ClientInterface
         }
 
         return $options;
+    }
+
+    /**
+     * Add SSL certificate options based on platform
+     * curl-impersonate uses BoringSSL which doesn't auto-detect system CA certs on Linux
+     */
+    private function addSslCertOptions(array &$options): void
+    {
+        // Check if user has already specified cacert in curlOptions
+        if (isset($this->curlOptions['cacert']) || isset($this->curlOptions['capath'])) {
+            return;
+        }
+
+        if (PlatformDetector::isWindows()) {
+            $options['ca-native'] = true;
+
+            return;
+        }
+
+        if (PlatformDetector::isMacOS()) {
+            // macOS typically has certs in a standard location that curl-impersonate can find
+            // but we'll add the common path as fallback
+            $macCertPath = '/etc/ssl/cert.pem';
+            if (file_exists($macCertPath) && is_readable($macCertPath)) {
+                $options['cacert'] = $macCertPath;
+            }
+
+            return;
+        }
+
+        // Linux: curl-impersonate with BoringSSL needs explicit CA cert path
+        $caCertPath = $this->findLinuxCaCertBundle();
+        if ($caCertPath !== null) {
+            $options['cacert'] = $caCertPath;
+        }
+    }
+
+    /**
+     * Find the CA certificate bundle on Linux systems
+     * Different distros store certs in different locations
+     */
+    private function findLinuxCaCertBundle(): ?string
+    {
+        // Common CA certificate bundle locations on Linux
+        $possiblePaths = [
+            '/etc/ssl/certs/ca-certificates.crt',      // Debian/Ubuntu/Gentoo
+            '/etc/pki/tls/certs/ca-bundle.crt',        // RHEL/CentOS/Fedora
+            '/etc/ssl/ca-bundle.pem',                   // openSUSE
+            '/etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem', // CentOS/RHEL 7+
+            '/etc/ssl/certs/ca-bundle.crt',            // Some distros
+            '/var/lib/ca-certificates/ca-bundle.pem',  // Some distros
+            '/etc/ssl/cert.pem',                        // Alpine/BSD-like
+            '/usr/local/share/certs/ca-root-nss.crt',  // FreeBSD
+            '/etc/pki/tls/cert.pem',                   // Fedora/RHEL alternative
+        ];
+
+        foreach ($possiblePaths as $path) {
+            if (file_exists($path) && is_readable($path)) {
+                return $path;
+            }
+        }
+
+        // Try the SSL_CERT_FILE environment variable as last resort
+        $envCertFile = getenv('SSL_CERT_FILE');
+        if ($envCertFile !== false && file_exists($envCertFile) && is_readable($envCertFile)) {
+            return $envCertFile;
+        }
+
+        return null;
     }
 
     /**

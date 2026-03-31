@@ -475,4 +475,82 @@ class ApiTest extends TestCase
         $this->assertEquals('John Doe', $responseData['json']['name']);
         $this->assertEquals('john.doe@example.com', $responseData['json']['email']);
     }
+
+    /**
+     * Test request with large headers that exceed command line limit
+     * This triggers the temp file header mechanism
+     */
+    public function testRequestWithLargeHeaders()
+    {
+        $this->waitBetweenRequests();
+
+        // Create a large cookie value (>7000 chars to trigger temp file usage)
+        $largeValue = str_repeat('x', 7500);
+
+        $headers = [
+            'Cookie' => 'session=' . $largeValue,
+            'X-Test-Header' => 'large-header-test',
+        ];
+
+        $response = PHPImpersonate::get('https://httpbun.com/headers', $headers);
+
+        $this->assertEquals(200, $response->status());
+        $responseData = $response->json();
+
+        // Verify both headers were sent correctly
+        $this->assertStringContainsString('session=' . $largeValue, $responseData['headers']['Cookie']);
+        $this->assertEquals('large-header-test', $responseData['headers']['X-Test-Header']);
+    }
+
+    /**
+     * Test request with multiple large headers
+     */
+    public function testRequestWithMultipleLargeHeaders()
+    {
+        $this->waitBetweenRequests();
+
+        // Create multiple headers that together exceed the limit
+        $headers = [
+            'X-Large-Header-1' => str_repeat('a', 3000),
+            'X-Large-Header-2' => str_repeat('b', 3000),
+            'X-Large-Header-3' => str_repeat('c', 3000),
+            'X-Test-Header' => 'multiple-large-headers',
+        ];
+
+        $response = PHPImpersonate::get('https://httpbun.com/headers', $headers);
+
+        $this->assertEquals(200, $response->status());
+        $responseData = $response->json();
+
+        // Verify all headers were sent correctly
+        $this->assertEquals(str_repeat('a', 3000), $responseData['headers']['X-Large-Header-1']);
+        $this->assertEquals(str_repeat('b', 3000), $responseData['headers']['X-Large-Header-2']);
+        $this->assertEquals(str_repeat('c', 3000), $responseData['headers']['X-Large-Header-3']);
+        $this->assertEquals('multiple-large-headers', $responseData['headers']['X-Test-Header']);
+    }
+
+    /**
+     * Test POST request with large cookie header
+     */
+    public function testPostWithLargeCookieHeader()
+    {
+        $this->waitBetweenRequests();
+
+        $largeCookie = str_repeat('data', 2000); // 8000 chars
+
+        $formData = ['field' => 'value'];
+
+        $response = PHPImpersonate::post('https://httpbun.com/post', $formData, [
+            'Cookie' => 'large_cookie=' . $largeCookie,
+            'X-Test-Header' => 'post-large-cookie',
+        ]);
+
+        $this->assertEquals(200, $response->status());
+        $responseData = $response->json();
+
+        // Verify cookie was sent
+        $this->assertStringContainsString('large_cookie=' . $largeCookie, $responseData['headers']['Cookie']);
+        $this->assertEquals('post-large-cookie', $responseData['headers']['X-Test-Header']);
+        $this->assertEquals('value', $responseData['form']['field']);
+    }
 }

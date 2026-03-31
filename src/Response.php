@@ -12,9 +12,9 @@ class Response
     public function __construct(
         private string $body,
         private int $statusCode,
-        private array $headers
-    ) {
-    }
+        private array $headers,
+        private array $headersMultiple,
+    ) {}
 
     /**
      * Get the response body
@@ -58,6 +58,16 @@ class Response
     public function headers(): array
     {
         return $this->headers;
+    }
+
+    /**
+     * Get all response headers with multiple values
+     *
+     * @return array<string,array<string>>
+     */
+    public function headersMultiple(): array
+    {
+        return $this->headersMultiple;
     }
 
     /**

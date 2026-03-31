@@ -574,7 +574,7 @@ class PHPImpersonate implements ClientInterface
         $browserCmd = $this->browser->getExecutablePath();
         $browserConfig = $this->browser->getConfig();
 
-        $options = $this->buildCurlOptions($method, $outputFile, $headerFile, $headers);
+        [$options, $headersTempFiles] = $this->buildCurlOptions($method, $outputFile, $headerFile, $headers);
         $additionalTempFiles = [];
 
         if ($body !== null) {
@@ -587,13 +587,16 @@ class PHPImpersonate implements ClientInterface
         // Add custom curl options (validated ones only)
         $options = array_merge($options, $this->curlOptions);
 
+        // Merge all temp files for cleanup
+        $allTempFiles = array_merge($headersTempFiles, $additionalTempFiles);
+
         try {
             $command = CommandBuilder::buildCurlCommand($browserCmd, [$url], $options);
 
-            return ['command' => $command, 'tempFiles' => $additionalTempFiles];
+            return ['command' => $command, 'tempFiles' => $allTempFiles];
         } catch (\Exception $e) {
             // Clean up any temporary files that were created
-            foreach ($additionalTempFiles as $tempFile) {
+            foreach ($allTempFiles as $tempFile) {
                 $this->deleteTempFile($tempFile);
             }
 
@@ -603,6 +606,8 @@ class PHPImpersonate implements ClientInterface
 
     /**
      * Build base curl options
+     *
+     * @return array{0: array, 1: array<string>} [options, tempFiles]
      */
     private function buildCurlOptions(
         string $method,
@@ -624,14 +629,37 @@ class PHPImpersonate implements ClientInterface
         // Handle SSL CA certificates based on platform
         $this->addSslCertOptions($options);
 
-        // Add headers
+        $tempFiles = [];
+
+        // Add headers - use temp file if headers are too large to avoid command line length limits
         if (! empty($headers)) {
+            $headerLines = [];
             foreach ($headers as $name => $value) {
-                $options['H'][] = "$name: $value";
+                $headerLines[] = "$name: $value";
+            }
+
+            // Calculate total header size to determine if we need a temp file
+            $totalHeaderSize = array_sum(array_map('strlen', $headerLines));
+            $maxHeaderSize = 7000; // Conservative limit for command line (Windows limit is ~8191)
+
+            if ($totalHeaderSize > $maxHeaderSize) {
+                // Write headers to temp file and use @filename syntax
+                $headersFile = $this->createTempFile('curl_impersonate_request_headers');
+                $content = implode("\n", $headerLines) . "\n";
+                if (file_put_contents($headersFile, $content) === false) {
+                    throw new RequestException('Failed to write request headers to temporary file');
+                }
+                $tempFiles[] = $headersFile;
+                $options['H'][] = "@$headersFile";
+            } else {
+                // Use inline headers
+                foreach ($headerLines as $headerLine) {
+                    $options['H'][] = $headerLine;
+                }
             }
         }
 
-        return $options;
+        return [$options, $tempFiles];
     }
 
     /**

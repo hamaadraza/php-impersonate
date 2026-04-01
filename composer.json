@@ -1,6 +1,6 @@
 {
   "name": "hamaadraza/php-impersonate",
-  "version": "1.0.8",
+  "version": "1.0.9",
   "description": "A PHP library for making HTTP requests with browser impersonation",
   "keywords": [
     "hamaadraza",
@@ -39,7 +39,7 @@
     "format:check": "vendor/bin/php-cs-fixer fix --config=.php-cs-fixer.dist.php --allow-risky=yes --dry-run --diff",
     "cs-check": "@format:check"
   },
-    "config": {
+  "config": {
     "sort-packages": true,
     "allow-plugins": {
       "pestphp/pest-plugin": true,

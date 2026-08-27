@@ -57,6 +57,79 @@ class CommandBuilder
     }
 
     /**
+     * Build a command as an argv array for proc_open()'s array mode.
+     *
+     * Array mode executes the program directly — no cmd.exe on Windows, no sh on
+     * Unix — so values need no shell escaping and cannot be used for injection.
+     * Prefer this over the string builders whenever the caller controls proc_open.
+     *
+     * @param string $executable The command executable
+     * @param array $arguments Positional arguments (appended last)
+     * @param array $options Command options
+     * @param string $type Command type (generic or curl)
+     * @return list<string> argv array, executable first
+     * @throws InvalidArgumentException If parameters are invalid
+     */
+    public static function buildCommandArgs(
+        string $executable,
+        array $arguments = [],
+        array $options = [],
+        string $type = self::TYPE_GENERIC
+    ): array {
+        self::validateInputs($executable, $type);
+
+        $args = [$executable];
+
+        foreach ($options as $option => $value) {
+            if (! is_string($option)) {
+                continue; // Skip invalid option keys
+            }
+
+            $flag = self::getOptionPrefix($option, $type) . $option;
+
+            if (is_bool($value)) {
+                if ($value) {
+                    $args[] = $flag;
+                }
+            } elseif (is_array($value)) {
+                foreach ($value as $item) {
+                    if ($item !== null) {
+                        $args[] = $flag;
+                        $args[] = (string)$item;
+                    }
+                }
+            } elseif ($value !== null) {
+                $args[] = $flag;
+                $args[] = (string)$value;
+            }
+        }
+
+        foreach ($arguments as $arg) {
+            if ($arg !== null) {
+                $args[] = (string)$arg;
+            }
+        }
+
+        return $args;
+    }
+
+    /**
+     * Build a curl command as an argv array for proc_open()'s array mode.
+     *
+     * @param string $executable The curl executable
+     * @param array $arguments Positional arguments (appended last)
+     * @param array $options Curl options
+     * @return list<string> argv array, executable first
+     */
+    public static function buildCurlCommandArgs(
+        string $executable,
+        array $arguments = [],
+        array $options = []
+    ): array {
+        return self::buildCommandArgs($executable, $arguments, $options, self::TYPE_CURL);
+    }
+
+    /**
      * Escape a path for the current platform
      *
      * @param string $path The path to escape
@@ -246,11 +319,15 @@ class CommandBuilder
     private static function escapeValue($value): string
     {
         $stringValue = (string)$value;
-        if (strlen($stringValue) > 8191) {
-            throw new RuntimeException('Argument too long: ' . $stringValue);
-        }
 
         $platform = PlatformDetector::getPlatform();
+
+        // cmd.exe's command line is limited to 8191 chars; Unix ARG_MAX is far larger
+        if ($platform === PlatformDetector::PLATFORM_WINDOWS && strlen($stringValue) > 8191) {
+            throw new RuntimeException(
+                sprintf('Argument too long (%d chars): %s...', strlen($stringValue), substr($stringValue, 0, 100))
+            );
+        }
 
         if ($platform === PlatformDetector::PLATFORM_WINDOWS) {
             return self::escapeWindowsValue($stringValue);

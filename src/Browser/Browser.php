@@ -8,6 +8,15 @@ use Raza\PHPImpersonate\Platform\PlatformDetector;
 
 class Browser implements BrowserInterface
 {
+    /**
+     * Per-process cache of --version verification results, keyed by binary path.
+     * Verification spawns a process, so doing it once per path (instead of once
+     * per client construction) matters for the static one-request helpers.
+     *
+     * @var array<string, bool>
+     */
+    private static array $verifiedBinaries = [];
+
     private string $executablePath;
     private array $config;
 
@@ -197,17 +206,17 @@ class Browser implements BrowserInterface
      */
     private function isCurlImpersonate(string $path, string $platform): bool
     {
+        if (isset(self::$verifiedBinaries[$path])) {
+            return self::$verifiedBinaries[$path];
+        }
+
         $errorRedirect = $platform === PlatformDetector::PLATFORM_WINDOWS ? '2>nul' : '2>/dev/null';
         $versionCommand = escapeshellarg($path) . ' --version ' . $errorRedirect;
 
         $output = shell_exec($versionCommand);
 
-        if (! $output) {
-            return false;
-        }
-
         // Check if the output contains "IMPERSONATE" which indicates curl-impersonate
-        return str_contains($output, 'IMPERSONATE');
+        return self::$verifiedBinaries[$path] = ($output && str_contains($output, 'IMPERSONATE'));
     }
 
     /**
@@ -219,7 +228,10 @@ class Browser implements BrowserInterface
         $errorRedirect = $platform === PlatformDetector::PLATFORM_WINDOWS ? '2>nul' : '2>/dev/null';
 
         $result = shell_exec("$whichCommand " . escapeshellarg($command) . " $errorRedirect");
-        $resolvedPath = trim((string) $result);
+
+        // Windows "where" prints one path per line when there are multiple matches
+        $lines = preg_split('/\r?\n/', trim((string) $result)) ?: [];
+        $resolvedPath = trim($lines[0] ?? '');
 
         return ($resolvedPath && file_exists($resolvedPath)) ? $resolvedPath : null;
     }

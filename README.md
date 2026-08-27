@@ -179,7 +179,7 @@ foreach ($response->headers() as $name => $values) {
 
 PHP-Impersonate supports mimicking various browsers:
 
-- `chrome99_android` (default)
+- `chrome99_android`
 - `chrome99`
 - `chrome100`
 - `chrome101`
@@ -195,10 +195,16 @@ PHP-Impersonate supports mimicking various browsers:
 - `chrome131_android`
 - `chrome133a`
 - `chrome136`
+- `chrome142`
+- `chrome145`
+- `chrome146`
+- `chrome150`
 - `edge99`
 - `edge101`
 - `firefox133`
 - `firefox135`
+- `firefox144`
+- `firefox147` (default)
 - `safari153`
 - `safari155`
 - `safari170`
@@ -209,7 +215,11 @@ PHP-Impersonate supports mimicking various browsers:
 - `safari184_ios`
 - `safari260`
 - `safari260_ios`
+- `safari2601`
 - `tor145`
+- `okhttp4_android`
+
+The authoritative list is always `Raza\PHPImpersonate\Browser\BrowserName::getAll()`.
 
 Example:
 ```php
@@ -217,6 +227,19 @@ Example:
 $client = new PHPImpersonate('firefox135');
 $response = $client->sendGet('https://example.com');
 ```
+
+### Keeping browsers and binaries up to date
+
+New browser profiles and binaries are pulled from upstream
+[curl-impersonate](https://github.com/lexiforest/curl-impersonate) automatically —
+no manual editing:
+
+```bash
+composer update-impersonate          # refresh binaries + add any new browsers
+composer update-impersonate -- --dry-run   # preview first
+```
+
+See [scripts/README.md](scripts/README.md) for details and per-step commands.
 
 ## Timeouts
 

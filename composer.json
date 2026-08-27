@@ -37,7 +37,10 @@
     "test-coverage": "vendor/bin/pest --coverage",
     "format": "vendor/bin/php-cs-fixer fix --config=.php-cs-fixer.dist.php --allow-risky=yes",
     "format:check": "vendor/bin/php-cs-fixer fix --config=.php-cs-fixer.dist.php --allow-risky=yes --dry-run --diff",
-    "cs-check": "@format:check"
+    "cs-check": "@format:check",
+    "update-impersonate": "@php scripts/update-impersonate.php",
+    "update-browsers": "@php scripts/update-browsers.php",
+    "update-binaries": "@php scripts/update-binaries.php"
   },
   "config": {
     "sort-packages": true,
@@ -48,8 +51,5 @@
     "bin-compat": "full"
   },
   "minimum-stability": "dev",
-  "prefer-stable": true,
-  "platform": {
-    "php": ">=8.0"
-  }
+  "prefer-stable": true
 }

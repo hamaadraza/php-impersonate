@@ -77,8 +77,12 @@ class Configuration
      */
     public static function setPlatformConfig(string $platform, array $config): void
     {
+        // Merge onto the platform's own existing config so a partial override
+        // keeps that platform's defaults; fall back to Linux only for new platforms
         self::$platformConfigs[$platform] = array_merge(
-            self::$platformConfigs[PlatformDetector::PLATFORM_LINUX] ?? [],
+            self::$platformConfigs[$platform]
+                ?? self::$platformConfigs[PlatformDetector::PLATFORM_LINUX]
+                ?? [],
             $config
         );
     }

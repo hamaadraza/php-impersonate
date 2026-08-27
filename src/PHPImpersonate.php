@@ -12,11 +12,11 @@ use Raza\PHPImpersonate\Exception\RequestException;
 use Raza\PHPImpersonate\Exception\PlatformNotSupportedException;
 
 /**
- * @phpstan-type BrowserName 'chrome99'|'chrome99_android'|'chrome100'|'chrome101'|'chrome104'|'chrome107'|'chrome110'|'chrome116'|'chrome119'|'chrome120'|'chrome123'|'chrome124'|'chrome131'|'chrome131_android'|'chrome133a'|'chrome136'|'edge99'|'edge101'|'firefox133'|'firefox135'|'safari153'|'safari155'|'safari170'|'safari172_ios'|'safari180'|'safari180_ios'|'safari184'|'safari184_ios'|'safari260'|'safari260_ios'|'tor145'
+ * @phpstan-type BrowserName 'chrome99'|'chrome99_android'|'chrome120'|'edge99'|'edge101'|'firefox133'|'firefox135'|'chrome110'|'safari153'|'safari155'|'safari170'|'safari172_ios'|'safari180'|'safari180_ios'|'safari184'|'safari184_ios'|'safari260_ios'|'chrome100'|'chrome101'|'chrome104'|'chrome107'|'chrome116'|'chrome119'|'chrome123'|'chrome124'|'chrome131'|'chrome131_android'|'chrome133a'|'chrome136'|'safari260'|'tor145'|'chrome142'|'chrome145'|'chrome146'|'chrome150'|'firefox144'|'firefox147'|'safari2601'|'okhttp4_android'
  */
 class PHPImpersonate implements ClientInterface
 {
-    private const DEFAULT_BROWSER = 'chrome99_android';
+    private const DEFAULT_BROWSER = 'firefox147';
     private const DEFAULT_TIMEOUT = 30;
     private const MAX_TIMEOUT = 3600; // 1 hour max
     private const MIN_TIMEOUT = 1;
@@ -30,9 +30,10 @@ class PHPImpersonate implements ClientInterface
      *                                               Available browsers: chrome99, chrome99_android, chrome100, chrome101,
      *                                               chrome104, chrome107, chrome110, chrome116, chrome119, chrome120,
      *                                               chrome123, chrome124, chrome131, chrome131_android, chrome133a,
-     *                                               chrome136, edge99, edge101, firefox133, firefox135, safari153,
+     *                                               chrome136, chrome142, chrome145, chrome146, chrome150, edge99,
+     *                                               edge101, firefox133, firefox135, firefox144, firefox147, safari153,
      *                                               safari155, safari170, safari172_ios, safari180, safari180_ios,
-     *                                               safari184, safari184_ios, safari260, safari260_ios, tor145
+     *                                               safari184, safari184_ios, safari260, safari260_ios, safari2601, tor145
      * @param int $timeout Request timeout in seconds
      * @param array<string,mixed> $curlOptions Custom curl options
      * @throws RequestException If the browser is invalid or platform is not supported
@@ -72,7 +73,9 @@ class PHPImpersonate implements ClientInterface
                 $request->getUrl(),
                 $tempFiles['body'],
                 $tempFiles['headers'],
-                $request->getHeaders(),
+                // Normalize here so "Header: Value" list entries work for every
+                // method, not just the sendPost/sendPatch/sendPut convenience paths
+                $this->normalizeHeaders($request->getHeaders()),
                 $request->getBody()
             );
 
@@ -90,9 +93,10 @@ class PHPImpersonate implements ClientInterface
             $responseBody = $isHead ? '' : $this->readTempFile($tempFiles['body']);
             $extractedStatus = null;
 
-            // If the temp file is empty, try to get response from command output
-            if (! $isHead && empty($responseBody) && ! empty($result['output'])) {
-                $extracted = $this->captureResponseFromOutput($result['output']);
+            // If the temp file is empty, try to get response from command stdout
+            // (never stderr — warnings there must not be mistaken for a body)
+            if (! $isHead && empty($responseBody) && ! empty($result['stdout'])) {
+                $extracted = $this->captureResponseFromOutput($result['stdout']);
                 $responseBody = $extracted['body'];
                 $extractedStatus = $extracted['status'];
             }
@@ -176,13 +180,7 @@ class PHPImpersonate implements ClientInterface
     public function sendPut(string $url, ?array $data = null, array $headers = []): Response
     {
         $headers = $this->normalizeHeaders($headers);
-
-        if ($data !== null) {
-            $headers['Content-Type'] = 'application/json';
-            $body = json_encode($data, JSON_THROW_ON_ERROR);
-        } else {
-            $body = null;
-        }
+        $body = $this->prepareRequestBody($data, $headers, 'application/json');
 
         return $this->send(Request::put($url, $headers, $body));
     }
@@ -342,7 +340,18 @@ class PHPImpersonate implements ClientInterface
      */
     private function validateCurlOptions(array $curlOptions): void
     {
-        $forbiddenOptions = ['o', 'output', 'D', 'dump-header', 'w', 'write-out'];
+        $forbiddenOptions = [
+            // Conflict with how responses are captured internally
+            'o', 'output', 'D', 'dump-header', 'w', 'write-out',
+            // Write files to paths chosen by the server or outside our control
+            'O', 'remote-name', 'remote-name-all', 'J', 'remote-header-name', 'output-dir',
+            // Load arbitrary curl config, which can re-introduce any of the above
+            'K', 'config',
+            // Redirect diagnostics to files
+            'trace', 'trace-ascii', 'stderr',
+            // Start a second request with a fresh option set, bypassing all checks
+            ':', 'next',
+        ];
 
         foreach ($forbiddenOptions as $option) {
             if (isset($curlOptions[$option])) {
@@ -365,6 +374,13 @@ class PHPImpersonate implements ClientInterface
         if (! filter_var($request->getUrl(), FILTER_VALIDATE_URL)) {
             throw new InvalidArgumentException('Invalid URL format');
         }
+
+        // FILTER_VALIDATE_URL accepts ftp://, file://localhost/..., etc.; this is
+        // an HTTP client, and passing other schemes to curl invites SSRF surprises
+        $scheme = strtolower((string) parse_url($request->getUrl(), PHP_URL_SCHEME));
+        if (! in_array($scheme, ['http', 'https'], true)) {
+            throw new InvalidArgumentException("Unsupported URL scheme \"$scheme\": only http and https are allowed");
+        }
     }
 
     /**
@@ -379,23 +395,15 @@ class PHPImpersonate implements ClientInterface
             return null;
         }
 
+        // The caller's Content-Type (any casing) wins; the method default applies otherwise
         $contentType = $this->findHeaderValue($headers, 'Content-Type');
-        $isJson = $contentType !== null && str_contains($contentType, 'application/json');
 
-        if ($isJson) {
-            try {
-                return json_encode($data, JSON_THROW_ON_ERROR);
-            } catch (\JsonException $e) {
-                throw new InvalidArgumentException('Failed to encode data as JSON: ' . $e->getMessage());
-            }
-        }
-
-        // Set default content type if not specified (under any casing)
         if ($contentType === null) {
             $headers['Content-Type'] = $defaultContentType;
+            $contentType = $defaultContentType;
         }
 
-        if ($defaultContentType === 'application/json') {
+        if (str_contains($contentType, 'application/json')) {
             try {
                 return json_encode($data, JSON_THROW_ON_ERROR);
             } catch (\JsonException $e) {
@@ -411,22 +419,17 @@ class PHPImpersonate implements ClientInterface
      */
     private function createTempFiles(): array
     {
-        $bodyFile = $this->createTempFile('curl_impersonate_body');
-        $headerFile = $this->createTempFile('curl_impersonate_headers');
-
-        $files = [
-            'body' => $bodyFile,
-            'headers' => $headerFile,
+        return [
+            'body' => $this->createTempFile('curl_impersonate_body'),
+            'headers' => $this->createTempFile('curl_impersonate_headers'),
         ];
-
-        // Track temp files for cleanup
-        $this->tempFiles = array_merge($this->tempFiles, array_values($files));
-
-        return $files;
     }
 
     /**
-     * Create a single temporary file
+     * Create a single temporary file.
+     *
+     * Every created file is tracked in $this->tempFiles so the destructor can
+     * clean up files orphaned by exceptions between creation and use.
      */
     private function createTempFile(string $prefix): string
     {
@@ -448,6 +451,8 @@ class PHPImpersonate implements ClientInterface
 
             throw new RequestException('Unable to set temporary file permissions');
         }
+
+        $this->tempFiles[] = $tempFile;
 
         return $tempFile;
     }
@@ -525,7 +530,7 @@ class PHPImpersonate implements ClientInterface
 
         foreach ($headers as $values) {
             foreach ($values as $value) {
-                if (preg_match('/HTTP\/\d\.\d\s+(\d+)/', $value, $matches)) {
+                if (preg_match('/HTTP\/[\d.]+\s+(\d{3})/', $value, $matches)) {
                     return $matches[1];
                 }
             }
@@ -541,8 +546,6 @@ class PHPImpersonate implements ClientInterface
     {
         foreach ($files as $file) {
             $this->deleteTempFile($file);
-            // Remove from tracking
-            $this->tempFiles = array_diff($this->tempFiles, [$file]);
         }
     }
 
@@ -565,6 +568,8 @@ class PHPImpersonate implements ClientInterface
         if (file_exists($file)) {
             @unlink($file);
         }
+
+        $this->tempFiles = array_diff($this->tempFiles, [$file]);
     }
 
     /**
@@ -598,7 +603,8 @@ class PHPImpersonate implements ClientInterface
         $allTempFiles = array_merge($headersTempFiles, $additionalTempFiles);
 
         try {
-            $command = CommandBuilder::buildCurlCommand($browserCmd, [$url], $options);
+            // argv array for proc_open array mode: executed directly, no shell involved
+            $command = CommandBuilder::buildCurlCommandArgs($browserCmd, [$url], $options);
 
             return ['command' => $command, 'tempFiles' => $allTempFiles];
         } catch (\Exception $e) {
@@ -649,6 +655,7 @@ class PHPImpersonate implements ClientInterface
         if (! empty($headers)) {
             $headerLines = [];
             foreach ($headers as $name => $value) {
+                $this->assertHeaderIsSafe((string)$name, (string)$value);
                 $headerLines[] = "$name: $value";
             }
 
@@ -661,6 +668,8 @@ class PHPImpersonate implements ClientInterface
                 $headersFile = $this->createTempFile('curl_impersonate_request_headers');
                 $content = implode("\n", $headerLines) . "\n";
                 if (file_put_contents($headersFile, $content) === false) {
+                    $this->deleteTempFile($headersFile);
+
                     throw new RequestException('Failed to write request headers to temporary file');
                 }
                 $tempFiles[] = $headersFile;
@@ -758,6 +767,8 @@ class PHPImpersonate implements ClientInterface
         $bodyFile = $this->createTempFile('curl_body_data');
 
         if (file_put_contents($bodyFile, $body) === false) {
+            $this->deleteTempFile($bodyFile);
+
             throw new RequestException('Failed to write request body to temporary file');
         }
 
@@ -817,8 +828,11 @@ class PHPImpersonate implements ClientInterface
 
     /**
      * Run the curl command with enhanced error handling
+     *
+     * @param list<string> $command argv array (executable first); proc_open array
+     *                              mode runs it directly without any shell
      */
-    private function runCommand(string $command): array
+    private function runCommand(array $command): array
     {
         $processTimeout = $this->timeout + self::PROCESS_TIMEOUT_BUFFER;
 
@@ -828,14 +842,16 @@ class PHPImpersonate implements ClientInterface
             2 => ["pipe", "w"],   // stderr
         ];
 
+        $displayCommand = implode(' ', $command);
+
         $process = proc_open($command, $descriptorspec, $pipes);
 
         if (! is_resource($process)) {
-            throw new RequestException("Failed to execute command: $command");
+            throw new RequestException("Failed to execute command: $displayCommand");
         }
 
         try {
-            return $this->handleProcess($process, $pipes, $processTimeout, $command);
+            return $this->handleProcess($process, $pipes, $processTimeout, $displayCommand);
         } finally {
             $this->closeProcess($process, $pipes);
         }
@@ -875,6 +891,13 @@ class PHPImpersonate implements ClientInterface
                 );
             }
 
+            // Block until the process produces output (or 200ms passes so the
+            // timeout check above still runs) instead of busy-polling
+            $read = [$pipes[1], $pipes[2]];
+            $write = null;
+            $except = null;
+            @stream_select($read, $write, $except, 0, 200000);
+
             // Read available data
             $stdout = stream_get_contents($pipes[1]);
             $stderr = stream_get_contents($pipes[2]);
@@ -885,8 +908,6 @@ class PHPImpersonate implements ClientInterface
             if ($stderr !== false) {
                 $errors .= $stderr;
             }
-
-            usleep(10000); // 10ms sleep to prevent CPU spinning
         }
 
         // Get remaining output
@@ -949,6 +970,9 @@ class PHPImpersonate implements ClientInterface
 
         return [
             'status_code' => $statusCode,
+            // stdout only: safe to mine for response content
+            'stdout' => $outputLines,
+            // stdout + stderr: for diagnostics, never for response bodies
             'output' => array_merge($outputLines, $errorLines),
         ];
     }
@@ -1007,6 +1031,19 @@ class PHPImpersonate implements ClientInterface
         }
 
         return $headers;
+    }
+
+    /**
+     * Reject header names/values that could smuggle extra header lines or
+     * confuse curl's -H parsing (header injection).
+     */
+    private function assertHeaderIsSafe(string $name, string $value): void
+    {
+        if ($name === '' || preg_match('/[\r\n\0]/', $name . $value) || str_contains($name, ':')) {
+            throw new InvalidArgumentException(
+                sprintf('Invalid header "%s": names must be non-empty without ":" and neither part may contain CR, LF, or NUL', $name)
+            );
+        }
     }
 
     /**

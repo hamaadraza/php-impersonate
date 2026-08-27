@@ -2,16 +2,12 @@
 
 namespace Raza\PHPImpersonate\Tests;
 
-use ReflectionClass;
 use PHPUnit\Framework\TestCase;
-use Raza\PHPImpersonate\PHPImpersonate;
+use Raza\PHPImpersonate\Support\ResponseHeaderParser;
 
 /**
- * Unit tests for PHPImpersonate::parseHeaders().
- *
- * parseHeaders() is a private method, so we invoke it via Reflection.
- * ReflectionClass::newInstanceWithoutConstructor() is used so no platform
- * detection or binary validation runs — these tests require no binary.
+ * Unit tests for response header parsing (ResponseHeaderParser::parse), the
+ * shared implementation both engines use. No binary required.
  */
 class HeaderParsingTest extends TestCase
 {
@@ -24,13 +20,7 @@ class HeaderParsingTest extends TestCase
      */
     private function parseHeaders(string $content): array
     {
-        $reflection = new ReflectionClass(PHPImpersonate::class);
-        $instance = $reflection->newInstanceWithoutConstructor();
-
-        $method = $reflection->getMethod('parseHeaders');
-        $method->setAccessible(true);
-
-        return $method->invoke($instance, $content);
+        return ResponseHeaderParser::parse($content);
     }
 
     // -------------------------------------------------------------------------

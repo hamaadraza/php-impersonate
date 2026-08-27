@@ -3,6 +3,7 @@
 namespace Raza\PHPImpersonate\Tests;
 
 use PHPUnit\Framework\TestCase;
+use Raza\PHPImpersonate\Request;
 use Raza\PHPImpersonate\PHPImpersonate;
 use PHPUnit\Framework\Attributes\DataProvider;
 
@@ -52,6 +53,20 @@ class EngineParityTest extends TestCase
             $process,
             "$browser: the executable and FFI engines produced different JA4 fingerprints"
         );
+    }
+
+    public function testGetWithBodyKeepsMethodOnBothEngines(): void
+    {
+        // A body must not silently promote GET to POST on either engine (B5).
+        $method = function (string $engine): string {
+            $r = (new PHPImpersonate('chrome146', 30, [], $engine))
+                ->send(new Request('GET', 'https://httpbun.com/anything', [], 'q=1'));
+
+            return $r->json()['method'] ?? '';
+        };
+
+        $this->assertSame('GET', $method(PHPImpersonate::ENGINE_FFI), 'FFI turned GET+body into another method');
+        $this->assertSame('GET', $method(PHPImpersonate::ENGINE_PROCESS), 'process turned GET+body into another method');
     }
 
     private function ja4(string $browser, string $engine): string

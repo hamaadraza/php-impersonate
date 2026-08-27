@@ -21,6 +21,7 @@ final class CurlImpersonate
     private const CURLOPT_WRITEDATA = 10001;
     private const CURLOPT_HEADERDATA = 10029;
     private const CURLOPT_FOLLOWLOCATION = 52;
+    private const CURLOPT_MAXREDIRS = 68;
     private const CURLOPT_TIMEOUT_MS = 155;
     private const CURLOPT_CONNECTTIMEOUT_MS = 156;
     private const CURLOPT_CUSTOMREQUEST = 10036;
@@ -30,12 +31,17 @@ final class CurlImpersonate
     private const CURLOPT_HTTPHEADER = 10023;
     private const CURLOPT_CAINFO = 10065;
     private const CURLOPT_ACCEPT_ENCODING = 10102;
+    private const CURLOPT_SSL_SESSIONID_CACHE = 150;
     private const CURLOPT_PROXY = 10004;
     private const CURLOPT_PROXYUSERPWD = 10006;
     private const CURLOPT_NOPROXY = 10177;
     private const CURLINFO_RESPONSE_CODE = 2097154;
 
     private const CURLE_OK = 0;
+    private const CURLE_TOO_MANY_REDIRECTS = 47;
+
+    /** Match the curl command-line tool's default redirect cap (the executable engine). */
+    private const MAX_REDIRECTS = 50;
 
     /**
      * Curl options this transport understands, mapped to their CURLOPT id.
@@ -152,6 +158,9 @@ final class CurlImpersonate
         try {
             $ffi->curl_easy_setopt($h, self::CURLOPT_URL, $url);
             $ffi->curl_easy_setopt($h, self::CURLOPT_FOLLOWLOCATION, 1);
+            // Cap redirects to match the executable engine (curl's tool default);
+            // without this, libcurl's default differs and the engines disagree.
+            $ffi->curl_easy_setopt($h, self::CURLOPT_MAXREDIRS, self::MAX_REDIRECTS);
             $ffi->curl_easy_setopt($h, self::CURLOPT_TIMEOUT_MS, $timeout * 1000);
             $ffi->curl_easy_setopt($h, self::CURLOPT_CONNECTTIMEOUT_MS, $timeout * 1000);
             $ffi->curl_easy_setopt($h, self::CURLOPT_WRITEDATA, $bodyFp);
@@ -174,6 +183,12 @@ final class CurlImpersonate
             // Enable transparent decompression (mirrors the executable's --compressed).
             $ffi->curl_easy_setopt($h, self::CURLOPT_ACCEPT_ENCODING, '');
 
+            // Disable TLS session-ID/ticket resumption: a resumed handshake adds a
+            // pre_shared_key extension, changing the JA3/JA4 fingerprint. Keeping
+            // every handshake fresh makes the fingerprint deterministic and equal
+            // to the executable engine's (a new process each request never resumes).
+            $ffi->curl_easy_setopt($h, self::CURLOPT_SSL_SESSIONID_CACHE, 0);
+
             $this->applyCaBundle($h);
             $this->applyMethod($h, $method, $body);
             $this->applyCurlOptions($h, $curlOptions);
@@ -188,7 +203,10 @@ final class CurlImpersonate
             $ffi->fflush($bodyFp);
             $ffi->fflush($hdrFp);
 
-            if ($rc !== self::CURLE_OK) {
+            // Hitting the redirect cap is not fatal: the last response is captured,
+            // and the executable engine returns it too. Return it for parity
+            // instead of throwing, so callers get one contract on both engines.
+            if ($rc !== self::CURLE_OK && $rc !== self::CURLE_TOO_MANY_REDIRECTS) {
                 // Depending on the PHP/FFI build, a `const char *` return may
                 // already arrive as a PHP string; otherwise it is CData.
                 $err = $ffi->curl_easy_strerror($rc);
@@ -267,10 +285,6 @@ final class CurlImpersonate
             return;
         }
 
-        if ($method !== 'GET') {
-            $this->ffi->curl_easy_setopt($h, self::CURLOPT_CUSTOMREQUEST, $method);
-        }
-
         if ($body !== null) {
             // Set the exact size first so binary bodies (with embedded NUL bytes)
             // are sent verbatim instead of being cut at the first NUL by strlen();
@@ -281,6 +295,14 @@ final class CurlImpersonate
                 throw new RequestException("libcurl-impersonate: failed to set POSTFIELDSIZE ($rc)", $rc);
             }
             $this->ffi->curl_easy_setopt($h, self::CURLOPT_COPYPOSTFIELDS, $body);
+        }
+
+        // Pin the method verb explicitly whenever it isn't a plain bodyless GET.
+        // In particular a body must not silently promote GET (or DELETE) to POST,
+        // which COPYPOSTFIELDS does on its own — matching the executable engine,
+        // which always passes -X <method>.
+        if ($method !== 'GET' || $body !== null) {
+            $this->ffi->curl_easy_setopt($h, self::CURLOPT_CUSTOMREQUEST, $method);
         }
     }
 

@@ -3,10 +3,73 @@
 namespace Raza\PHPImpersonate\Tests;
 
 use PHPUnit\Framework\TestCase;
+use Raza\PHPImpersonate\Browser\BrowserName;
 use Raza\PHPImpersonate\Browser\BrowserConfig;
 
 class BrowserConfigTest extends TestCase
 {
+    /**
+     * BrowserName::getAll() and BrowserConfig must list exactly the same set of
+     * browsers — they are two hand/generator-maintained lists and can drift (T3).
+     */
+    public function testBrowserNameAndConfigListsAreInParity(): void
+    {
+        $configs = array_keys(BrowserConfig::getAllConfigs());
+        $names = BrowserName::getAll();
+
+        sort($configs);
+        sort($names);
+
+        $this->assertSame(
+            $configs,
+            $names,
+            'BrowserName::getAll() and BrowserConfig::getAllConfigs() must match'
+        );
+    }
+
+    /**
+     * Modern Chrome/Firefox negotiate ECH; every one of these profiles must carry
+     * the `ech` option, or the executable engine sends a fingerprint no real
+     * browser sends (regression guard for the missing-ECH bug).
+     */
+    public function testModernChromeAndFirefoxDeclareEch(): void
+    {
+        $mustHaveEch = ['chrome142', 'chrome145', 'chrome146', 'chrome150', 'firefox144', 'firefox147'];
+
+        foreach ($mustHaveEch as $browser) {
+            $options = BrowserConfig::getConfig($browser)['options'];
+            $this->assertArrayHasKey('ech', $options, "$browser must declare the ech option");
+            $this->assertSame('grease', $options['ech'], "$browser ech should be 'grease'");
+        }
+    }
+
+    /**
+     * Guard actual config values, not just structure: a non-empty cipher list and
+     * a User-Agent that matches the browser it claims to be (T2).
+     */
+    public function testConfigValuesAreConsistent(): void
+    {
+        $expectedUa = [
+            'firefox147' => 'Firefox/147',
+            'chrome146' => 'Chrome/146',
+            'safari184' => 'Version/18.4',
+        ];
+
+        foreach (BrowserConfig::getAllConfigs() as $name => $config) {
+            $this->assertArrayHasKey('ciphers', $config, "$name missing ciphers");
+            $this->assertNotEmpty($config['ciphers'], "$name has empty ciphers");
+            $this->assertNotEmpty($config['headers']['User-Agent'] ?? '', "$name missing User-Agent");
+        }
+
+        foreach ($expectedUa as $browser => $token) {
+            $this->assertStringContainsString(
+                $token,
+                BrowserConfig::getConfig($browser)['headers']['User-Agent'],
+                "$browser User-Agent should contain '$token'"
+            );
+        }
+    }
+
     /**
      * Test getting all configurations
      */

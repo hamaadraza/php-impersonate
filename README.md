@@ -1,40 +1,231 @@
 # PHP-Impersonate
 
 [![Tests](https://img.shields.io/github/actions/workflow/status/hamaadraza/php-impersonate/run-tests.yml?branch=main&label=tests&style=flat-square)](https://github.com/hamaadraza/php-impersonate/actions/workflows/run-tests.yml)
+[![Latest Version](https://img.shields.io/packagist/v/hamaadraza/php-impersonate?style=flat-square)](https://packagist.org/packages/hamaadraza/php-impersonate)
+[![Total Downloads](https://img.shields.io/packagist/dt/hamaadraza/php-impersonate?style=flat-square)](https://packagist.org/packages/hamaadraza/php-impersonate)
+[![PHP Version](https://img.shields.io/packagist/php-v/hamaadraza/php-impersonate?style=flat-square)](https://packagist.org/packages/hamaadraza/php-impersonate)
+[![License](https://img.shields.io/packagist/l/hamaadraza/php-impersonate?style=flat-square)](LICENSE.md)
 
-A PHP library for making HTTP requests with browser impersonation. This library uses curl-impersonate to mimic various browsers' network signatures, making it useful for accessing websites that may detect and block automated requests.
+Make HTTP requests that look like a **real browser**. PHP-Impersonate wraps
+[curl-impersonate](https://github.com/lexiforest/curl-impersonate) to reproduce
+the exact TLS and HTTP/2 fingerprints of Chrome, Firefox, Safari, Edge and Tor —
+so requests sail past the anti-bot checks that block ordinary HTTP clients.
+
+```php
+use Raza\PHPImpersonate\PHPImpersonate;
+
+$response = PHPImpersonate::get('https://tls.peet.ws/api/all');
+echo $response->json()['tls']['ja4']; // a genuine browser fingerprint
+```
+
+---
+
+## Contents
+
+- [Why](#why) · [Requirements](#requirements) · [Installation](#installation) · [Quick start](#quick-start)
+- [**Two transports**](#two-transports) — [Executable](#1-executable-transport--phpimpersonate) · [FFI](#2-ffi-transport--fficlient) · [Automatic](#3-automatic-selection--clientfactory)
+- [Supported platforms](#supported-platforms)
+- [Making requests](#making-requests) · [Responses](#responses) · [Headers](#working-with-headers)
+- [Browsers](#browsers) · [Proxies](#proxies) · [Request bodies](#request-bodies) · [Timeouts](#timeouts) · [Errors](#error-handling)
+- [Keeping up to date](#keeping-up-to-date) · [Testing](#testing) · [License](#license)
+
+---
+
+## Why
+
+Websites increasingly fingerprint the TLS handshake and HTTP/2 frames to tell
+real browsers from scripts. cURL, Guzzle and friends have a distinctive
+signature that is trivial to block. PHP-Impersonate sends byte-for-byte the same
+handshake as a chosen browser version, so your request looks like it came from
+that browser.
+
+- 🎭 **39 browser profiles** — Chrome, Firefox, Safari (desktop + iOS), Edge, Tor, OkHttp.
+- 🔒 **Real TLS/JA4 + HTTP/2 fingerprints**, not just a `User-Agent` string.
+- ⚡ **Two transports** — a zero-setup executable, and an optional in-process FFI
+  path that reuses connections for serious throughput.
+- 📦 **Batteries included** — binaries ship in the package for common platforms.
+- 🧩 **One clean interface** — the same `Response` and methods on every transport.
+
+## Requirements
+
+- PHP **8.0+**
+- For the [FFI transport](#2-ffi-transport--fficlient): the `ffi` extension
+  (bundled with PHP; always usable on the CLI).
 
 ## Installation
-
-Install via Composer:
 
 ```bash
 composer require hamaadraza/php-impersonate
 ```
 
-## System Requirements
+That's it on common platforms — the binaries are bundled. On other platforms run
+a one-time [installer](#supported-platforms).
 
-- PHP 8.0 or higher
+## Quick start
+
+```php
+<?php
+require 'vendor/autoload.php';
+
+use Raza\PHPImpersonate\PHPImpersonate;
+
+$response = PHPImpersonate::get('https://example.com');
+
+echo $response->status();      // 200
+echo $response->body();        // the HTML
+$data = $response->json();     // decoded JSON (throws on invalid JSON)
+```
+
+---
+
+## Two transports
+
+Every request ultimately goes through **curl-impersonate**. PHP-Impersonate can
+reach it two ways, both behind the same `ClientInterface`:
+
+| | **Executable** — `PHPImpersonate` | **FFI** — `FfiClient` |
+|---|---|---|
+| How | runs the bundled `curl-impersonate` binary per request | calls `libcurl-impersonate` in-process via PHP FFI |
+| Performance | one short-lived process per request | no process spawn; **keep-alive connections reused** across requests |
+| Setup | none — works everywhere | needs the `ffi` extension usable + the shared library (bundled on common platforms) |
+| Custom curl options (proxy, etc.) | ✅ supported | ❌ not supported |
+| Best for | simplicity, proxies, restricted hosts | many requests, high throughput |
+
+> [!TIP]
+> Not sure which to pick? Use [`ClientFactory`](#3-automatic-selection--clientfactory) —
+> it chooses the FFI transport when available and falls back to the executable
+> automatically, so your code is identical either way.
+
+All three entry points (`PHPImpersonate`, `FfiClient`, `ClientFactory::create()`)
+expose the same request methods and return the same [`Response`](#responses):
+
+```php
+$client->sendGet(string $url, array $headers = []): Response;
+$client->sendPost(string $url, ?array $data = null, array $headers = []): Response;
+$client->sendPut(string $url, ?array $data = null, array $headers = []): Response;
+$client->sendPatch(string $url, ?array $data = null, array $headers = []): Response;
+$client->sendDelete(string $url, array $headers = []): Response;
+$client->sendHead(string $url, array $headers = []): Response;
+$client->send(Raza\PHPImpersonate\Request $request): Response;
+```
+
+### 1. Executable transport — `PHPImpersonate`
+
+The default. Runs the bundled binary; works on any platform with no extra setup,
+and is the only transport that accepts custom curl options (proxies, etc.).
+
+**Static helpers** — one-liners for one-off requests:
+
+```php
+use Raza\PHPImpersonate\PHPImpersonate;
+
+PHPImpersonate::get(string $url, array $headers = [], int $timeout = 30, string $browser = 'firefox147', array $curlOptions = []): Response;
+PHPImpersonate::post(string $url, ?array $data = null, array $headers = [], int $timeout = 30, string $browser = 'firefox147', array $curlOptions = []): Response;
+PHPImpersonate::put(/* … same shape as post … */): Response;
+PHPImpersonate::patch(/* … same shape as post … */): Response;
+PHPImpersonate::delete(string $url, array $headers = [], int $timeout = 30, string $browser = 'firefox147', array $curlOptions = []): Response;
+PHPImpersonate::head(/* … same shape as delete … */): Response;
+
+// Impersonate a specific browser:
+$response = PHPImpersonate::get('https://example.com', [], 30, 'chrome146');
+```
+
+**Instance** — reuse configuration across requests:
+
+```php
+$client = new PHPImpersonate(
+    browser: 'firefox147',   // default; any name from BrowserName::getAll()
+    timeout: 30,             // seconds
+    curlOptions: [],         // e.g. ['proxy' => 'http://127.0.0.1:8080']
+);
+
+$response = $client->sendGet('https://example.com');
+```
+
+### 2. FFI transport — `FfiClient`
+
+Loads `libcurl-impersonate` directly through PHP's FFI extension. No process is
+spawned and connections are kept alive between requests on the same client, so
+it is **markedly faster** for many requests to the same host.
+
+```php
+use Raza\PHPImpersonate\FfiClient;
+
+if (FfiClient::isAvailable()) {
+    $client = new FfiClient('firefox147', timeout: 30);
+
+    // Connections are reused across these calls:
+    foreach ($urls as $url) {
+        $response = $client->sendGet($url);
+    }
+}
+```
+
+**Availability.** `FfiClient::isAvailable()` returns `true` only when the `ffi`
+extension is usable *and* the shared library loads on this platform:
+
+- `ffi` is always usable on the **CLI**; other SAPIs (FPM, Apache) additionally
+  need `ffi.enable` turned on.
+- The library ships in the package for [common platforms](#supported-platforms)
+  and is fetched on demand elsewhere. Point at a custom build with the
+  `PHP_IMPERSONATE_LIB` environment variable.
+
+> [!NOTE]
+> The FFI transport does **not** accept `$curlOptions`, so proxies and other raw
+> curl flags are only available on the [executable transport](#1-executable-transport--phpimpersonate).
+
+### 3. Automatic selection — `ClientFactory`
+
+Prefer this in application code. It returns the fastest transport that will
+actually work here, with a transparent fallback — so you get FFI's speed where
+possible and never a broken client where it isn't.
+
+```php
+use Raza\PHPImpersonate\ClientFactory;
+
+$client = ClientFactory::create('firefox147');   // FfiClient if usable, else PHPImpersonate
+$response = $client->sendGet('https://example.com');
+
+ClientFactory::preferredDriver();  // 'ffi' or 'process' — what create() would choose
+```
+
+Selection rules for the default `'auto'` driver:
+
+- Uses **FFI** when `FfiClient::isAvailable()` and no `$curlOptions` are given.
+- Otherwise uses the **executable** (custom curl options are executable-only).
+
+Force a transport when you need to:
+
+```php
+ClientFactory::create('chrome146', 30, [], ClientFactory::DRIVER_FFI);      // FFI, or throw
+ClientFactory::create('chrome146', 30, [], ClientFactory::DRIVER_PROCESS);  // always executable
+```
+
+---
 
 ## Supported platforms
 
-The package ships prebuilt `curl-impersonate` binaries (and FFI libraries) for
-the most common platforms, so they work with no extra steps:
+Prebuilt binaries **and** FFI libraries ship inside the package for the most
+common platforms, so everything works with no extra steps:
 
-- Linux x86_64 (glibc)
-- macOS ARM64 (Apple Silicon)
-- Windows x86_64
+| Platform | Bundled |
+|---|:---:|
+| Linux x86_64 (glibc) | ✅ |
+| macOS ARM64 (Apple Silicon) | ✅ |
+| Windows x86_64 | ✅ |
+| Linux x86_64 (musl / Alpine) | on demand |
+| Linux ARM64 (glibc & musl) | on demand |
+| macOS x86_64 (Intel) | on demand |
 
-On any other platform — Linux musl/Alpine, Linux ARM64, or Intel macOS (x86_64)
-— run the installer once after `composer require` to download the matching
-binary and library:
+On an “on demand” platform, run the installer once after `composer require` to
+download the matching binary and library:
 
 ```bash
 php vendor/hamaadraza/php-impersonate/bin/php-impersonate-install
 ```
 
-To wire it into your own project so it runs automatically, add it to your root
-`composer.json` (dependency scripts do not run on their own):
+To run it automatically, add it to **your project's** `composer.json` (a
+dependency's own scripts don't run on install):
 
 ```json
 {
@@ -45,442 +236,206 @@ To wire it into your own project so it runs automatically, add it to your root
 }
 ```
 
-The installer is a no-op when the current platform is already bundled. Pass
-`--no-libs` to skip the (larger) FFI library, or `--force` to re-download.
+The installer is a no-op when the platform is already bundled. Flags:
+`--no-libs` (skip the FFI library), `--force` (re-download), `--version=TAG`.
 
-## Transports: executable vs. FFI
+---
 
-By default PHP-Impersonate runs the bundled `curl-impersonate` **executable** —
-it works everywhere with no extra setup. There is also an optional **FFI**
-transport backed by the `libcurl-impersonate` shared library that spawns no
-process and reuses keep-alive connections between requests, so it is markedly
-faster when you make many requests.
+## Making requests
 
-The `libcurl-impersonate` shared library ships **inside the package** for the
-common platforms (see [Supported platforms](#supported-platforms)), so the FFI
-transport works out of the box there; on other platforms the installer above
-fetches it. Use `ClientFactory` to get the fastest transport that's available,
-with an automatic fallback to the executable:
+### GET
 
 ```php
-use Raza\PHPImpersonate\ClientFactory;
-
-$client = ClientFactory::create('firefox147');   // FfiClient if available, else PHPImpersonate
-$response = $client->sendGet('https://example.com');
+$response = PHPImpersonate::get('https://example.com', [
+    'Accept-Language' => 'en-US,en;q=0.9',
+]);
 ```
 
-`ClientFactory::create()` returns a `ClientInterface`, so the rest of your code
-is identical regardless of transport. Both implement `send*`, return the same
-`Response`, and share the same validation/header handling.
+### POST / PUT / PATCH
 
-The FFI transport is used automatically whenever the `ffi` extension is usable
-(always on the CLI; other SAPIs additionally need `ffi.enable` set). When it is
-not — e.g. FFI disabled on a shared host — `ClientFactory` transparently falls
-back to the executable transport, so your code keeps working either way. To
-point at a custom library build, set the `PHP_IMPERSONATE_LIB` environment
-variable.
-
-Check what would be used:
+Pass an array of data. It is form-encoded by default, or JSON when you set a JSON
+`Content-Type` (see [Request bodies](#request-bodies)).
 
 ```php
-use Raza\PHPImpersonate\FfiClient;
-use Raza\PHPImpersonate\ClientFactory;
-
-FfiClient::isAvailable();          // bool
-ClientFactory::preferredDriver();  // 'ffi' or 'process'
-```
-
-Note: custom `$curlOptions` are only honoured by the executable transport, so
-passing any keeps `ClientFactory` on the process driver.
-
-## Basic Usage
-
-```php
-<?php
-require 'vendor/autoload.php';
-
-use Raza\PHPImpersonate\PHPImpersonate;
-
-// Simple GET request
-$response = PHPImpersonate::get('https://example.com');
-echo $response->body();
-
-// POST request with data
 $response = PHPImpersonate::post('https://example.com/api', [
     'username' => 'johndoe',
-    'email' => 'john@example.com'
+    'email'    => 'john@example.com',
 ]);
+```
 
-// Check the response
+### DELETE / HEAD
+
+```php
+$deleted = PHPImpersonate::delete('https://example.com/api/1');
+$head    = PHPImpersonate::head('https://example.com');   // headers only, empty body
+```
+
+## Responses
+
+Every request returns a `Response`:
+
+| Method | Returns | Description |
+|---|---|---|
+| `status()` | `int` | HTTP status code |
+| `isSuccess()` | `bool` | `true` for 2xx |
+| `body()` | `string` | Raw response body |
+| `json($assoc = true, $depth = 512, $flags = 0)` | `mixed` | Decoded JSON — throws `\JsonException` on invalid JSON |
+| `header($name, $default = null)` | `?string` | First value of a header (case-insensitive) |
+| `headerAll($name)` | `string[]` | **All** values of a header (use for `Set-Cookie`) |
+| `hasHeader($name)` | `bool` | Whether a header is present (case-insensitive) |
+| `headers()` | `array<string, string[]>` | All headers as name → list of values |
+| `toArray()` | `array` | `['body' => …, 'statusCode' => …, 'headers' => …]` |
+| `dump()` | `string` | Human-readable summary (for logging) |
+| `debug()` | `self` | Echo `dump()` and return `$this` |
+
+```php
+$response = PHPImpersonate::get('https://api.example.com/user');
+
 if ($response->isSuccess()) {
-    $data = $response->json();
-    echo "User created with ID: " . $data['id'];
-} else {
-    echo "Error: " . $response->status();
+    $user = $response->json();
+    echo $user['name'];
 }
 ```
 
-## API Reference
+## Working with headers
 
-### Static Methods
-
-The library provides convenient static methods for making requests:
+Each header name maps to an **array of values** (`string[]`), because headers
+like `Set-Cookie` legitimately appear multiple times.
 
 ```php
-// GET request with optional headers and timeout
-PHPImpersonate::get(string $url, array $headers = [], int $timeout = 30): Response
-
-// POST request with optional data, headers and timeout
-PHPImpersonate::post(string $url, ?array $data = null, array $headers = [], int $timeout = 30): Response
-
-// PUT request with optional data, headers and timeout
-PHPImpersonate::put(string $url, ?array $data = null, array $headers = [], int $timeout = 30): Response
-
-// PATCH request with optional data, headers and timeout 
-PHPImpersonate::patch(string $url, ?array $data = null, array $headers = [], int $timeout = 30): Response
-
-// DELETE request with optional headers and timeout
-PHPImpersonate::delete(string $url, array $headers = [], int $timeout = 30): Response
-
-// HEAD request with optional headers and timeout
-PHPImpersonate::head(string $url, array $headers = [], int $timeout = 30): Response
+// Single-value headers — header() is all you need
+$type = $response->header('Content-Type');        // 'application/json'
+$etag = $response->header('ETag', 'none');        // default when absent
 ```
 
-### Instance Methods
-
-You can also create an instance of the client for more configuration options:
-
-```php
-// Create a client with specific browser and timeout
-$client = new PHPImpersonate('chrome107', 30);
-
-// Instance methods
-$client->sendGet(string $url, array $headers = []): Response
-$client->sendPost(string $url, ?array $data = null, array $headers = []): Response
-$client->sendPut(string $url, ?array $data = null, array $headers = []): Response
-$client->sendPatch(string $url, ?array $data = null, array $headers = []): Response
-$client->sendDelete(string $url, array $headers = []): Response
-$client->sendHead(string $url, array $headers = []): Response
-
-// Generic send method
-$client->send(Request $request): Response
-```
-
-### Response Methods
-
-The `Response` class provides several methods for working with HTTP responses:
+> [!IMPORTANT]
+> `Set-Cookie` must not be folded into one comma-joined string
+> ([RFC 6265 §4.1.1](https://www.rfc-editor.org/rfc/rfc6265#section-4.1.1)), so
+> `header('Set-Cookie')` would drop all but the first cookie. Use `headerAll()`:
 
 ```php
-// Get the HTTP status code
-$response->status(): int
-
-// Get the response body as string
-$response->body(): string
-
-// Check if the response was successful (status code 200-299)
-$response->isSuccess(): bool
-
-// Parse the response body as JSON (throws \JsonException on failure)
-$response->json(bool $associative = true, int $depth = 512, int $flags = 0): mixed
-
-// Check whether a header is present (case-insensitive)
-$response->hasHeader(string $name): bool
-
-// Get the first value of a header (case-insensitive), or $default when absent
-$response->header(string $name, ?string $default = null): ?string
-
-// Get ALL values of a header — use this for Set-Cookie and other repeatable headers
-$response->headerAll(string $name): string[]
-
-// Get all headers as a map of name → list of values
-$response->headers(): array<string, string[]>
-
-// Serialise to a plain array
-$response->toArray(): array
-
-// Dump response details to a string (for logging)
-$response->dump(): string
-
-// Print response details and return self (for debugging)
-$response->debug(): Response
-```
-
-### Working with Headers
-
-Most headers have a single value, so `header()` is all you need:
-
-```php
-$contentType = $response->header('Content-Type');         // 'application/json'
-$etag        = $response->header('ETag', 'none');         // fallback to 'none'
-
-if ($response->hasHeader('X-Rate-Limit-Remaining')) {
-    $remaining = $response->header('X-Rate-Limit-Remaining');
-}
-```
-
-Some headers are legitimately repeated by the server — most commonly `Set-Cookie`.
-Per [RFC 6265 §4.1.1](https://www.rfc-editor.org/rfc/rfc6265#section-4.1.1), cookie values
-must **not** be folded into a single comma-separated string, so `header('Set-Cookie')` would
-silently drop all but the first cookie. Use `headerAll()` instead:
-
-```php
-$cookies = $response->headerAll('Set-Cookie');
-// ['sessionid=abc; Path=/; HttpOnly', 'csrftoken=xyz; Path=/; SameSite=Lax']
-
-foreach ($cookies as $cookie) {
+foreach ($response->headerAll('Set-Cookie') as $cookie) {
     echo $cookie . "\n";
 }
-```
 
-`headers()` returns the full map when you need to inspect everything at once:
-
-```php
-$allHeaders = $response->headers();
-// [
-//     'Content-Type' => ['application/json'],
-//     'Set-Cookie'   => ['sessionid=abc; Path=/; HttpOnly', 'csrftoken=xyz; Path=/'],
-//     'Cache-Control'=> ['no-cache, no-store'],
-// ]
-
+// Or inspect everything — every value is an array:
 foreach ($response->headers() as $name => $values) {
-    // $values is always an array, even for single-value headers
     foreach ($values as $value) {
         echo "$name: $value\n";
     }
 }
 ```
 
-**Key point:** Each header name maps to an **array of values** (`string[]`), not a single string. This correctly handles HTTP responses where headers like `Set-Cookie` can appear multiple times.
+## Browsers
 
-## Browser Options
+Pass any of these names as the `$browser` argument (default **`firefox147`**):
 
-PHP-Impersonate supports mimicking various browsers:
+<details>
+<summary><strong>All 39 supported browsers</strong></summary>
 
-- `chrome99_android`
-- `chrome99`
-- `chrome100`
-- `chrome101`
-- `chrome104`
-- `chrome107`
-- `chrome110`
-- `chrome116`
-- `chrome119`
-- `chrome120`
-- `chrome123`
-- `chrome124`
-- `chrome131`
-- `chrome131_android`
-- `chrome133a`
-- `chrome136`
-- `chrome142`
-- `chrome145`
-- `chrome146`
-- `chrome150`
-- `edge99`
-- `edge101`
-- `firefox133`
-- `firefox135`
-- `firefox144`
-- `firefox147` (default)
-- `safari153`
-- `safari155`
-- `safari170`
-- `safari172_ios`
-- `safari180`
-- `safari180_ios`
-- `safari184`
-- `safari184_ios`
-- `safari260`
-- `safari260_ios`
-- `safari2601`
-- `tor145`
-- `okhttp4_android`
+**Chrome** — `chrome99`, `chrome99_android`, `chrome100`, `chrome101`, `chrome104`,
+`chrome107`, `chrome110`, `chrome116`, `chrome119`, `chrome120`, `chrome123`,
+`chrome124`, `chrome131`, `chrome131_android`, `chrome133a`, `chrome136`,
+`chrome142`, `chrome145`, `chrome146`, `chrome150`
+
+**Edge** — `edge99`, `edge101`
+
+**Firefox** — `firefox133`, `firefox135`, `firefox144`, `firefox147` *(default)*
+
+**Safari** — `safari153`, `safari155`, `safari170`, `safari172_ios`, `safari180`,
+`safari180_ios`, `safari184`, `safari184_ios`, `safari260`, `safari260_ios`, `safari2601`
+
+**Other** — `tor145`, `okhttp4_android`
+
+</details>
 
 The authoritative list is always `Raza\PHPImpersonate\Browser\BrowserName::getAll()`.
 
-Example:
 ```php
-// Create a client that mimics Firefox
-$client = new PHPImpersonate('firefox135');
+$client = new PHPImpersonate('safari184');
 $response = $client->sendGet('https://example.com');
 ```
 
-### Keeping browsers and binaries up to date
+## Proxies
 
-New browser profiles and binaries are pulled from upstream
-[curl-impersonate](https://github.com/lexiforest/curl-impersonate) automatically —
-no manual editing:
+Proxies are configured through `curlOptions`, so they use the
+[executable transport](#1-executable-transport--phpimpersonate):
 
-```bash
-composer update-impersonate          # refresh binaries + add any new browsers
-composer update-impersonate -- --dry-run   # preview first
+```php
+$client = new PHPImpersonate('chrome146', 30, [
+    'proxy'      => 'http://127.0.0.1:8080',   // or socks5://127.0.0.1:1080
+    'proxy-user' => 'user:password',           // optional
+]);
+
+$response = $client->sendGet('https://api.ipify.org?format=json');
 ```
 
-See [scripts/README.md](scripts/README.md) for details and per-step commands.
+| Option | Description | Example |
+|---|---|---|
+| `proxy` | Proxy address (supports `http://`, `socks5://`, …) | `'http://proxy.example.com:3128'` |
+| `proxy-user` | Proxy credentials | `'username:password'` |
+
+## Request bodies
+
+For `POST`, `PUT` and `PATCH`, the array you pass is encoded based on the
+`Content-Type` header (matched case-insensitively):
+
+```php
+// Form-encoded (application/x-www-form-urlencoded) — the POST default
+PHPImpersonate::post('https://example.com/api', ['name' => 'John']);
+
+// JSON — set a JSON Content-Type
+PHPImpersonate::post('https://example.com/api',
+    ['name' => 'John'],
+    ['Content-Type' => 'application/json']
+);
+```
+
+> [!NOTE]
+> `PUT` and `PATCH` default to **JSON**; `POST` defaults to **form-encoded**.
+> An explicit `Content-Type` always wins.
 
 ## Timeouts
 
-You can configure request timeouts:
-
 ```php
-// Set a 5-second timeout for this request
-$response = PHPImpersonate::get('https://example.com', [], 5);
-
-// Or when creating a client instance
-$client = new PHPImpersonate('chrome107', 10); // 10-second timeout
+PHPImpersonate::get('https://example.com', [], 5);   // 5-second timeout
+$client = new PHPImpersonate('chrome146', 10);       // 10-second default for this client
 ```
 
-## Proxy Configuration
+## Error handling
 
-You can route requests through a proxy server using the `curlOptions` parameter:
-
-### Basic Proxy Usage
-
-```php
-use Raza\PHPImpersonate\PHPImpersonate;
-
-$client = new PHPImpersonate(
-    browser: 'chrome136',
-    timeout: 30,
-    curlOptions: [
-        'proxy' => 'http://127.0.0.1:8080',  // HTTP proxy
-        'proxy-user' => 'user:password',    // optional authentication
-    ]
-);
-
-$response = $client->sendGet('https://api.ipify.org?format=json');
-
-echo $response->body();
-```
-
-### Proxy Options
-
-The following proxy-related curl options are supported:
-
-| Option | Description | Example |
-|--------|-------------|---------|
-| `proxy` | Proxy server address | `'http://127.0.0.1:8080'` or `'http://proxy.example.com:3128'` |
-| `proxy-user` | Proxy authentication credentials | `'username:password'` |
-
-### SOCKS Proxy
-
-You can also use SOCKS proxies by specifying the protocol:
+Transport failures (DNS, connection, timeout, a non-loadable library, etc.)
+throw `RequestException`. HTTP error statuses do **not** throw — check
+`isSuccess()`:
 
 ```php
-$client = new PHPImpersonate(
-    browser: 'chrome136',
-    timeout: 30,
-    curlOptions: [
-        'proxy' => 'socks5://127.0.0.1:1080',    // SOCKS5 proxy
-    ]
-);
-```
+use Raza\PHPImpersonate\Exception\RequestException;
 
-### Using Proxy with Static Methods
-
-For one-off requests with a proxy, create an instance and use the instance methods:
-
-```php
-$client = new PHPImpersonate(
-    browser: 'chrome136',
-    timeout: 30,
-    curlOptions: [
-        'proxy' => 'http://proxy.example.com:8080',
-        'proxy-user' => 'user:pass',
-    ]
-);
-
-// GET request through proxy
-$response = $client->sendGet('https://example.com');
-
-// POST request through proxy
-$response = $client->sendPost('https://example.com/api', [
-    'key' => 'value'
-]);
-```
-
-## Advanced Examples
-
-### JSON API Request
-
-```php
-// Data will be automatically converted to JSON with correct Content-Type
-$data = [
-    'title' => 'New Post',
-    'body' => 'This is the content',
-    'userId' => 1
-];
-
-$response = PHPImpersonate::post(
-    'https://jsonplaceholder.typicode.com/posts',
-    $data,
-    ['Content-Type' => 'application/json']
-);
-
-$post = $response->json();
-echo "Created post with ID: {$post['id']}\n";
-```
-
-### Error Handling
-
-```php
 try {
-    $response = PHPImpersonate::get('https://example.com/nonexistent', [], 5);
-    
-    if (!$response->isSuccess()) {
-        echo "Error: HTTP {$response->status()}\n";
-        echo $response->body();
+    $response = PHPImpersonate::get('https://example.com/maybe', [], 5);
+
+    if (! $response->isSuccess()) {
+        echo "HTTP {$response->status()}\n";
     }
-} catch (\Raza\PHPImpersonate\Exception\RequestException $e) {
-    echo "Request failed: " . $e->getMessage();
+} catch (RequestException $e) {
+    echo "Request failed: {$e->getMessage()}";
 }
 ```
 
-## Data Formats for POST, PUT and PATCH Requests
+## Keeping up to date
 
-PHP-Impersonate supports sending data in different formats:
+New browser profiles and binaries come straight from upstream
+[curl-impersonate](https://github.com/lexiforest/curl-impersonate) — no manual
+editing:
 
-### Form Data
-
-By default, data is sent as form data (`application/x-www-form-urlencoded`):
-
-```php
-// This will be sent as form data
-$response = PHPImpersonate::post('https://example.com/api', [
-    'username' => 'johndoe',
-    'email' => 'john@example.com'
-]);
-
-// Explicitly specify form data
-$response = PHPImpersonate::post('https://example.com/api',
-    [
-        'username' => 'johndoe',
-        'email' => 'john@example.com'
-    ],
-    ['Content-Type' => 'application/x-www-form-urlencoded']
-);
+```bash
+composer update-impersonate            # refresh binaries + add any new browsers
+composer update-impersonate -- --dry-run   # preview first
 ```
 
-### JSON Data
-
-You can send data as JSON by specifying the `Content-Type` header:
-
-```php
-// Send data as JSON
-$response = PHPImpersonate::post('https://example.com/api',
-    [
-        'username' => 'johndoe',
-        'email' => 'john@example.com'
-    ],
-    ['Content-Type' => 'application/json']
-);
-```
-
-For PUT and PATCH requests, JSON is used as the default format.
+See [scripts/README.md](scripts/README.md) for per-step commands and details.
 
 ## Testing
-
-Run the test suite:
 
 ```bash
 composer test
@@ -488,4 +443,4 @@ composer test
 
 ## License
 
-This project is licensed under the MIT License - see the LICENSE file for details.
+MIT — see [LICENSE.md](LICENSE.md).

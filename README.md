@@ -163,6 +163,11 @@ is true only when the `ffi` extension is usable — always on the CLI; other SAP
 also need `ffi.enable` — and the shared library loads on this platform (bundled
 for [common platforms](#supported-platforms); `PHP_IMPERSONATE_LIB` overrides it).
 
+> [!NOTE]
+> The FFI engine is **POSIX-only** (Linux and macOS). On Windows the executable
+> engine is always used — `auto` handles this transparently, so nothing changes
+> for you; the fingerprints are identical either way.
+
 ---
 
 ## Supported platforms

@@ -25,18 +25,16 @@ final class CurlImpersonate
     private const CURLOPT_CONNECTTIMEOUT_MS = 156;
     private const CURLOPT_CUSTOMREQUEST = 10036;
     private const CURLOPT_NOBODY = 44;
-    private const CURLOPT_POSTFIELDSIZE_LARGE = 120;
+    private const CURLOPT_POSTFIELDSIZE_LARGE = 30120; // CURLOPTTYPE_OFF_T (30000) + 120
     private const CURLOPT_COPYPOSTFIELDS = 10165;
     private const CURLOPT_HTTPHEADER = 10023;
     private const CURLOPT_CAINFO = 10065;
-    private const CURLOPT_SSL_OPTIONS = 216;
     private const CURLOPT_ACCEPT_ENCODING = 10102;
     private const CURLOPT_PROXY = 10004;
     private const CURLOPT_PROXYUSERPWD = 10006;
     private const CURLOPT_NOPROXY = 10177;
     private const CURLINFO_RESPONSE_CODE = 2097154;
 
-    private const CURLSSLOPT_NATIVE_CA = 16; // 1 << 4
     private const CURLE_OK = 0;
 
     /**
@@ -62,7 +60,6 @@ final class CurlImpersonate
         void *curl_slist_append(void *list, const char *string);
         void curl_slist_free_all(void *list);
         void *open_memstream(char **bufp, unsigned long *sizep);
-        void *fopen(const char *path, const char *mode);
         int fflush(void *stream);
         int fclose(void *stream);
         void free(void *ptr);
@@ -96,6 +93,13 @@ final class CurlImpersonate
     public static function isSupported(): bool
     {
         if (! extension_loaded('FFI')) {
+            return false;
+        }
+        // The FFI engine is POSIX-only: it captures responses via open_memstream,
+        // which a Windows curl-impersonate DLL does not export (and PHP FFI resolves
+        // every declared symbol eagerly at cdef time). On Windows the executable
+        // engine is always used instead.
+        if (PlatformDetector::isWindows()) {
             return false;
         }
         // FFI is always enabled on the CLI; other SAPIs need ffi.enable truthy
@@ -154,7 +158,18 @@ final class CurlImpersonate
             $ffi->curl_easy_setopt($h, self::CURLOPT_HEADERDATA, $hdrFp);
 
             // Apply the full browser fingerprint (TLS, HTTP/2, base headers).
-            $ffi->curl_easy_impersonate($h, $browser, 1);
+            // A target the loaded library does not know returns non-zero and
+            // applies nothing — without this check the request would silently go
+            // out with a plain libcurl fingerprint, defeating the whole purpose.
+            $rc = $ffi->curl_easy_impersonate($h, $browser, 1);
+            if ($rc !== self::CURLE_OK) {
+                throw new RequestException(
+                    "libcurl-impersonate does not support target '$browser' ($rc). "
+                    . 'The installed shared library may be older than this package '
+                    . "'s browser list; refresh it with `composer update-libraries`.",
+                    $rc
+                );
+            }
 
             // Enable transparent decompression (mirrors the executable's --compressed).
             $ffi->curl_easy_setopt($h, self::CURLOPT_ACCEPT_ENCODING, '');
@@ -200,7 +215,8 @@ final class CurlImpersonate
     }
 
     /**
-     * Open an in-memory (or temp-file) capture sink.
+     * Open an in-memory capture sink backed by open_memstream (POSIX-only; the
+     * engine never runs on Windows — see isSupported()).
      *
      * @return array{0: \FFI\CData, 1: callable(bool=): string} [FILE*, reader]
      *   The reader returns captured bytes; pass true to close/cleanup and return ''.
@@ -209,56 +225,30 @@ final class CurlImpersonate
     {
         $ffi = $this->ffi;
 
-        if (! PlatformDetector::isWindows()) {
-            $buf = $ffi->new('char*');
-            $size = $ffi->new('unsigned long');
-            $fp = $ffi->open_memstream(FFI::addr($buf), FFI::addr($size));
-
-            $closed = false;
-            $reader = function (bool $close = false) use ($ffi, $fp, &$buf, $size, &$closed): string {
-                if ($closed) {
-                    return '';
-                }
-                if ($close) {
-                    $ffi->fclose($fp);
-                    if (! FFI::isNull($buf)) {
-                        $ffi->free($buf);
-                    }
-                    $closed = true;
-
-                    return '';
-                }
-                $ffi->fflush($fp);
-
-                return FFI::isNull($buf) ? '' : FFI::string($buf, $size->cdata);
-            };
-
-            return [$fp, $reader];
+        $buf = $ffi->new('char*');
+        $size = $ffi->new('unsigned long');
+        $fp = $ffi->open_memstream(FFI::addr($buf), FFI::addr($size));
+        if ($fp === null || FFI::isNull($fp)) {
+            throw new RequestException('libcurl-impersonate: open_memstream() failed');
         }
 
-        // Windows fallback: default fwrite() into a temp file, read it back.
-        $path = tempnam(sys_get_temp_dir(), 'ffi_curl');
-        $fp = $ffi->fopen($path, 'wb');
-        $closedFp = false;
-        $reader = function (bool $close = false) use ($ffi, $fp, $path, &$closedFp): string {
-            if (! $closedFp) {
-                $ffi->fflush($fp);
+        $closed = false;
+        $reader = function (bool $close = false) use ($ffi, $fp, &$buf, $size, &$closed): string {
+            if ($closed) {
+                return '';
             }
             if ($close) {
-                if (! $closedFp) {
-                    $ffi->fclose($fp);
-                    $closedFp = true;
+                $ffi->fclose($fp);
+                if (! FFI::isNull($buf)) {
+                    $ffi->free($buf);
                 }
-                @unlink($path);
+                $closed = true;
 
                 return '';
             }
-            if (! $closedFp) {
-                $ffi->fclose($fp);
-                $closedFp = true;
-            }
+            $ffi->fflush($fp);
 
-            return is_file($path) ? (string) file_get_contents($path) : '';
+            return FFI::isNull($buf) ? '' : FFI::string($buf, $size->cdata);
         };
 
         return [$fp, $reader];
@@ -282,9 +272,14 @@ final class CurlImpersonate
         }
 
         if ($body !== null) {
-            // Set size first so binary/JSON bodies are sent verbatim; COPYPOSTFIELDS
-            // copies the buffer so it need not outlive this call.
-            $this->ffi->curl_easy_setopt($h, self::CURLOPT_POSTFIELDSIZE_LARGE, strlen($body));
+            // Set the exact size first so binary bodies (with embedded NUL bytes)
+            // are sent verbatim instead of being cut at the first NUL by strlen();
+            // COPYPOSTFIELDS then copies the buffer so it need not outlive this call.
+            // Checked: a wrong option id here would otherwise corrupt bodies silently.
+            $rc = $this->ffi->curl_easy_setopt($h, self::CURLOPT_POSTFIELDSIZE_LARGE, strlen($body));
+            if ($rc !== self::CURLE_OK) {
+                throw new RequestException("libcurl-impersonate: failed to set POSTFIELDSIZE ($rc)", $rc);
+            }
             $this->ffi->curl_easy_setopt($h, self::CURLOPT_COPYPOSTFIELDS, $body);
         }
     }
@@ -310,11 +305,8 @@ final class CurlImpersonate
      */
     private function applyCaBundle($h): void
     {
-        if (PlatformDetector::isWindows()) {
-            $this->ffi->curl_easy_setopt($h, self::CURLOPT_SSL_OPTIONS, self::CURLSSLOPT_NATIVE_CA);
-
-            return;
-        }
+        // POSIX-only engine (see isSupported()), so a CA bundle path is always
+        // the right mechanism; BoringSSL does not auto-discover the trust store.
         $ca = \Raza\PHPImpersonate\Support\CaBundle::path();
         if ($ca !== null) {
             $this->ffi->curl_easy_setopt($h, self::CURLOPT_CAINFO, $ca);

@@ -39,11 +39,20 @@ class PHPImpersonate implements ClientInterface
     private ?BrowserInterface $browser = null;
     private string $browserName;
     private string $engine;
-    private ?CurlImpersonate $ffiEngine = null;
     private array $tempFiles = [];
 
     /** Cached one-time FFI load probe. */
     private static ?bool $ffiProbe = null;
+
+    /**
+     * FFI engines shared process-wide, keyed by library path. Sharing the curl
+     * handle across clients is what lets keep-alive connections be reused between
+     * requests — including across the throwaway instances the static helpers
+     * create — so `PHPImpersonate::get()` is as fast as a retained client.
+     *
+     * @var array<string, CurlImpersonate>
+     */
+    private static array $ffiEngines = [];
 
     /**
      * @param BrowserName|BrowserInterface $browser Browser to use (name or browser instance).
@@ -125,13 +134,28 @@ class PHPImpersonate implements ClientInterface
         }
 
         try {
-            new CurlImpersonate($lib); // FFI::cdef + curl_easy_init
+            // Build the shared engine now (FFI::cdef + curl_easy_init) so the
+            // probe is not wasted — the first real request reuses this instance.
+            self::$ffiEngines[$lib] ??= new CurlImpersonate($lib);
             self::$ffiProbe = true;
         } catch (\Throwable $e) {
             self::$ffiProbe = false;
         }
 
         return self::$ffiProbe;
+    }
+
+    /**
+     * The process-wide FFI engine for the resolved library, created on first use.
+     */
+    private static function ffiEngine(): CurlImpersonate
+    {
+        $lib = LibResolver::resolve();
+        if ($lib === null) {
+            throw new RequestException('libcurl-impersonate shared library not found.');
+        }
+
+        return self::$ffiEngines[$lib] ??= new CurlImpersonate($lib);
     }
 
     /**
@@ -492,20 +516,14 @@ class PHPImpersonate implements ClientInterface
      */
     private function sendViaFfi(Request $request): Response
     {
-        if ($this->ffiEngine === null) {
-            $lib = LibResolver::resolve();
-            if ($lib === null) {
-                throw new RequestException('libcurl-impersonate shared library not found.');
-            }
-            $this->ffiEngine = new CurlImpersonate($lib);
-        }
+        $engine = self::ffiEngine();
 
         $headers = $this->normalizeHeaders($request->getHeaders());
         foreach ($headers as $name => $value) {
             $this->assertHeaderIsSafe((string) $name, (string) $value);
         }
 
-        $result = $this->ffiEngine->request(
+        $result = $engine->request(
             $request->getMethod(),
             $request->getUrl(),
             $headers,
@@ -746,7 +764,7 @@ class PHPImpersonate implements ClientInterface
         $additionalTempFiles = [];
 
         if ($body !== null) {
-            $additionalTempFiles = $this->addBodyToOptions($options, $body, $headers);
+            $additionalTempFiles = $this->addBodyToOptions($options, $body);
         }
 
         // Add browser-specific configuration
@@ -913,11 +931,8 @@ class PHPImpersonate implements ClientInterface
     /**
      * Add request body to curl options
      */
-    private function addBodyToOptions(array &$options, string $body, array $headers): array
+    private function addBodyToOptions(array &$options, string $body): array
     {
-        $contentType = $this->findHeaderValue($headers, 'Content-Type') ?? '';
-        $isJson = str_contains($contentType, 'application/json');
-
         // Always use temporary files for large data to avoid command line length limits
         // This prevents escapeshellarg() from failing on Windows with large arguments
         $bodyFile = $this->createTempFile('curl_body_data');
@@ -928,13 +943,10 @@ class PHPImpersonate implements ClientInterface
             throw new RequestException('Failed to write request body to temporary file');
         }
 
-        if ($isJson) {
-            // Use data-binary for JSON to preserve formatting
-            $options['data-binary'] = "@$bodyFile";
-        } else {
-            // Use data for form data, but with file reference to avoid command line limits
-            $options['data'] = "@$bodyFile";
-        }
+        // Always --data-binary: plain --data strips CRs and stops at NUL bytes, which
+        // corrupts binary and multi-line payloads. The body was encoded exactly as
+        // intended upstream, so send it verbatim regardless of content type.
+        $options['data-binary'] = "@$bodyFile";
 
         return [$bodyFile];
     }

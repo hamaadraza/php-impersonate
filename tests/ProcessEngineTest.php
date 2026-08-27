@@ -3,6 +3,7 @@
 namespace Raza\PHPImpersonate\Tests;
 
 use PHPUnit\Framework\TestCase;
+use Raza\PHPImpersonate\Request;
 use Raza\PHPImpersonate\PHPImpersonate;
 
 /**
@@ -55,5 +56,20 @@ class ProcessEngineTest extends TestCase
         $response = $this->process('chrome146')->sendHead(self::API . '/any');
         $this->assertSame(200, $response->status());
         $this->assertSame('', $response->body());
+    }
+
+    public function testBinaryBodyIsSentVerbatim(): void
+    {
+        // A body with an embedded NUL byte must not be truncated (regression: B1).
+        $body = "AB\0CDEFGH"; // 9 bytes, NUL at index 2
+        $response = $this->process('chrome146')->send(new Request(
+            'POST',
+            self::API . '/anything',
+            ['Content-Type' => 'application/octet-stream'],
+            $body
+        ));
+
+        $this->assertSame(200, $response->status());
+        $this->assertSame('9', $response->json()['headers']['Content-Length'] ?? null);
     }
 }

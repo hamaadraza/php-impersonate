@@ -38,16 +38,20 @@ class FfiClient implements ClientInterface
     /**
      * @param BrowserName|BrowserInterface $browser Browser to impersonate (name or instance).
      * @param int $timeout Request timeout in seconds.
+     * @param array<string,mixed> $curlOptions Supported curl options (e.g. 'proxy', 'proxy-user').
+     *                                          See {@see supportedCurlOptions()}.
      * @param string|null $libPath Explicit libcurl-impersonate path (defaults to auto-resolution).
      * @throws RequestException If FFI or the library is unavailable, or the handle cannot be created.
-     * @throws InvalidArgumentException If the timeout is invalid.
+     * @throws InvalidArgumentException If the timeout or a curl option is invalid.
      */
     public function __construct(
         string|BrowserInterface $browser = self::DEFAULT_BROWSER,
         private int $timeout = self::DEFAULT_TIMEOUT,
+        private array $curlOptions = [],
         ?string $libPath = null
     ) {
         $this->validateTimeout($timeout);
+        $this->validateCurlOptions($curlOptions);
         $this->browser = $browser instanceof BrowserInterface ? $browser->getName() : $browser;
 
         if (! CurlImpersonate::isSupported()) {
@@ -68,6 +72,17 @@ class FfiClient implements ClientInterface
         } catch (\Throwable $e) {
             throw new RequestException('Failed to load libcurl-impersonate via FFI: ' . $e->getMessage(), 0, $e);
         }
+    }
+
+    /**
+     * The curl option names this transport supports (e.g. 'proxy', 'proxy-user').
+     * Other raw curl options are only available on the executable transport.
+     *
+     * @return list<string>
+     */
+    public static function supportedCurlOptions(): array
+    {
+        return CurlImpersonate::supportedOptionKeys();
     }
 
     /**
@@ -123,7 +138,8 @@ class FfiClient implements ClientInterface
             $headers,
             $request->getBody(),
             $this->browser,
-            $this->timeout
+            $this->timeout,
+            $this->curlOptions
         );
 
         $isHead = strtoupper($request->getMethod()) === 'HEAD';
@@ -198,6 +214,25 @@ class FfiClient implements ClientInterface
             throw new InvalidArgumentException(
                 sprintf('Timeout must be between %d and %d seconds, got %d', self::MIN_TIMEOUT, self::MAX_TIMEOUT, $timeout)
             );
+        }
+    }
+
+    /**
+     * @param array<string,mixed> $curlOptions
+     * @throws InvalidArgumentException on any option the FFI transport can't apply.
+     */
+    private function validateCurlOptions(array $curlOptions): void
+    {
+        $supported = CurlImpersonate::supportedOptionKeys();
+        $unsupported = array_diff(array_keys($curlOptions), $supported);
+
+        if ($unsupported !== []) {
+            throw new InvalidArgumentException(sprintf(
+                'The FFI transport does not support the curl option(s): %s. '
+                . 'Supported: %s. Use the executable transport (PHPImpersonate) for other options.',
+                implode(', ', $unsupported),
+                implode(', ', $supported)
+            ));
         }
     }
 }

@@ -31,10 +31,24 @@ final class CurlImpersonate
     private const CURLOPT_CAINFO = 10065;
     private const CURLOPT_SSL_OPTIONS = 216;
     private const CURLOPT_ACCEPT_ENCODING = 10102;
+    private const CURLOPT_PROXY = 10004;
+    private const CURLOPT_PROXYUSERPWD = 10006;
+    private const CURLOPT_NOPROXY = 10177;
     private const CURLINFO_RESPONSE_CODE = 2097154;
 
     private const CURLSSLOPT_NATIVE_CA = 16; // 1 << 4
     private const CURLE_OK = 0;
+
+    /**
+     * Curl options this transport understands, mapped to their CURLOPT id.
+     * Keys mirror the executable transport's option names so the same
+     * $curlOptions array works with either. Values are string options.
+     */
+    private const SUPPORTED_OPTIONS = [
+        'proxy' => self::CURLOPT_PROXY,
+        'proxy-user' => self::CURLOPT_PROXYUSERPWD,
+        'noproxy' => self::CURLOPT_NOPROXY,
+    ];
 
     private const HEADER = <<<'CDEF'
         void *curl_easy_init(void);
@@ -95,9 +109,20 @@ final class CurlImpersonate
     }
 
     /**
+     * Curl option names supported by this transport (see SUPPORTED_OPTIONS).
+     *
+     * @return list<string>
+     */
+    public static function supportedOptionKeys(): array
+    {
+        return array_keys(self::SUPPORTED_OPTIONS);
+    }
+
+    /**
      * Perform a request. Inputs are assumed already validated/normalised.
      *
      * @param array<string,string> $headers
+     * @param array<string,mixed> $curlOptions Only keys in SUPPORTED_OPTIONS are applied.
      * @return array{status: int, headers: string, body: string}
      */
     public function request(
@@ -106,7 +131,8 @@ final class CurlImpersonate
         array $headers,
         ?string $body,
         string $browser,
-        int $timeout
+        int $timeout,
+        array $curlOptions = []
     ): array {
         $ffi = $this->ffi;
         $h = $this->handle;
@@ -135,6 +161,7 @@ final class CurlImpersonate
 
             $this->applyCaBundle($h);
             $this->applyMethod($h, $method, $body);
+            $this->applyCurlOptions($h, $curlOptions);
 
             $slist = $this->buildHeaderList($headers);
             if ($slist !== null) {
@@ -147,7 +174,10 @@ final class CurlImpersonate
             $ffi->fflush($hdrFp);
 
             if ($rc !== self::CURLE_OK) {
-                $msg = FFI::string($ffi->curl_easy_strerror($rc));
+                // Depending on the PHP/FFI build, a `const char *` return may
+                // already arrive as a PHP string; otherwise it is CData.
+                $err = $ffi->curl_easy_strerror($rc);
+                $msg = is_string($err) ? $err : FFI::string($err);
 
                 throw new RequestException("libcurl-impersonate request failed ($rc): $msg", $rc);
             }
@@ -256,6 +286,22 @@ final class CurlImpersonate
             // copies the buffer so it need not outlive this call.
             $this->ffi->curl_easy_setopt($h, self::CURLOPT_POSTFIELDSIZE_LARGE, strlen($body));
             $this->ffi->curl_easy_setopt($h, self::CURLOPT_COPYPOSTFIELDS, $body);
+        }
+    }
+
+    /**
+     * Apply the supported subset of $curlOptions to the handle. Unknown keys are
+     * ignored here (FfiClient rejects them up front with a clear message).
+     *
+     * @param \FFI\CData $h
+     * @param array<string,mixed> $curlOptions
+     */
+    private function applyCurlOptions($h, array $curlOptions): void
+    {
+        foreach ($curlOptions as $key => $value) {
+            if (isset(self::SUPPORTED_OPTIONS[$key]) && $value !== null && $value !== '') {
+                $this->ffi->curl_easy_setopt($h, self::SUPPORTED_OPTIONS[$key], (string) $value);
+            }
         }
     }
 

@@ -34,17 +34,18 @@ final class ClientFactory
     ): ClientInterface {
         switch ($driver) {
             case self::DRIVER_FFI:
-                return new FfiClient($browser, $timeout);
+                return new FfiClient($browser, $timeout, $curlOptions);
 
             case self::DRIVER_PROCESS:
                 return new PHPImpersonate($browser, $timeout, $curlOptions);
 
             case self::DRIVER_AUTO:
-                // Custom curl options are only meaningful to the executable path,
-                // so keep the process driver whenever any are supplied.
-                if ($curlOptions === [] && FfiClient::isAvailable()) {
+                // Prefer FFI when it is usable and can apply every requested curl
+                // option (it supports the proxy options; other raw flags remain
+                // executable-only).
+                if (FfiClient::isAvailable() && self::ffiCanHandle($curlOptions)) {
                     try {
-                        return new FfiClient($browser, $timeout);
+                        return new FfiClient($browser, $timeout, $curlOptions);
                     } catch (\Throwable $e) {
                         // Any late FFI failure: fall back to the executable so the
                         // caller always gets a working client.
@@ -67,8 +68,18 @@ final class ClientFactory
      */
     public static function preferredDriver(array $curlOptions = []): string
     {
-        return ($curlOptions === [] && FfiClient::isAvailable())
+        return (FfiClient::isAvailable() && self::ffiCanHandle($curlOptions))
             ? self::DRIVER_FFI
             : self::DRIVER_PROCESS;
+    }
+
+    /**
+     * Whether the FFI transport can apply every supplied curl option.
+     *
+     * @param array<string,mixed> $curlOptions
+     */
+    private static function ffiCanHandle(array $curlOptions): bool
+    {
+        return array_diff(array_keys($curlOptions), FfiClient::supportedCurlOptions()) === [];
     }
 }

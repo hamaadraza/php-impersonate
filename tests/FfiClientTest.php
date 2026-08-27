@@ -111,4 +111,21 @@ class FfiClientTest extends TestCase
             $this->assertSame(200, $client->sendGet(self::API . '/get')->status());
         }
     }
+
+    public function testUnsupportedCurlOptionIsRejected(): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessage('does not support');
+        new FfiClient('chrome146', 30, ['output' => '/tmp/nope']);
+    }
+
+    public function testProxyOptionIsApplied(): void
+    {
+        // Routing through an unreachable proxy must fail — proving the proxy
+        // option actually takes effect (without it, the request would succeed).
+        $client = new FfiClient('chrome146', 5, ['proxy' => 'http://127.0.0.1:9']);
+
+        $this->expectException(\Raza\PHPImpersonate\Exception\RequestException::class);
+        $client->sendGet(self::API . '/get');
+    }
 }

@@ -88,8 +88,9 @@ reach it two ways, both behind the same `ClientInterface`:
 | How | runs the bundled `curl-impersonate` binary per request | calls `libcurl-impersonate` in-process via PHP FFI |
 | Performance | one short-lived process per request | no process spawn; **keep-alive connections reused** across requests |
 | Setup | none — works everywhere | needs the `ffi` extension usable + the shared library (bundled on common platforms) |
-| Custom curl options (proxy, etc.) | ✅ supported | ❌ not supported |
-| Best for | simplicity, proxies, restricted hosts | many requests, high throughput |
+| Proxies | ✅ | ✅ |
+| Other raw curl options | ✅ any curl flag | ❌ proxy options only |
+| Best for | restricted hosts, arbitrary curl flags | many requests, high throughput |
 
 > [!TIP]
 > Not sure which to pick? Use [`ClientFactory`](#3-automatic-selection--clientfactory) —
@@ -170,9 +171,14 @@ extension is usable *and* the shared library loads on this platform:
   and is fetched on demand elsewhere. Point at a custom build with the
   `PHP_IMPERSONATE_LIB` environment variable.
 
-> [!NOTE]
-> The FFI transport does **not** accept `$curlOptions`, so proxies and other raw
-> curl flags are only available on the [executable transport](#1-executable-transport--phpimpersonate).
+**Curl options.** `FfiClient` accepts a `$curlOptions` array as its third
+argument, supporting the proxy options (`proxy`, `proxy-user`, `noproxy`) —
+`FfiClient::supportedCurlOptions()` lists them, and any other key throws. Other
+raw curl flags remain [executable-only](#1-executable-transport--phpimpersonate).
+
+```php
+$client = new FfiClient('chrome146', 30, ['proxy' => 'http://127.0.0.1:8080']);
+```
 
 ### 3. Automatic selection — `ClientFactory`
 
@@ -358,14 +364,20 @@ $response = $client->sendGet('https://example.com');
 
 ## Proxies
 
-Proxies are configured through `curlOptions`, so they use the
-[executable transport](#1-executable-transport--phpimpersonate):
+Configure a proxy through `curlOptions` — supported on **both** transports:
 
 ```php
+// Executable transport
 $client = new PHPImpersonate('chrome146', 30, [
     'proxy'      => 'http://127.0.0.1:8080',   // or socks5://127.0.0.1:1080
     'proxy-user' => 'user:password',           // optional
 ]);
+
+// FFI transport (curlOptions is the 3rd argument)
+$client = new FfiClient('chrome146', 30, ['proxy' => 'http://127.0.0.1:8080']);
+
+// Or let ClientFactory pick the transport — proxy requests can use FFI too
+$client = ClientFactory::create('chrome146', 30, ['proxy' => 'http://127.0.0.1:8080']);
 
 $response = $client->sendGet('https://api.ipify.org?format=json');
 ```

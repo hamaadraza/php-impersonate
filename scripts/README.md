@@ -58,6 +58,23 @@ The installed version is recorded in `bin/VERSION`. The host-platform binary is
 verified by running `--version` (it must report `IMPERSONATE`); cross-platform
 binaries can't be executed on the host, so verify those on their target OS.
 
+#### Shared libraries for the FFI client (`--libs`)
+
+The FFI transport ([FfiClient](../src/FfiClient.php)) uses the
+`libcurl-impersonate` shared library. These libraries are **committed to the
+package** (`bin/<platform>/libcurl-impersonate.{so,dylib,dll}`) so end users get
+them automatically on `composer require` — no install step. Re-fetch them when
+bumping the curl-impersonate version:
+
+```bash
+composer update-libraries                          # all platforms
+composer update-binaries  -- --libs                # executables + libraries together
+composer update-binaries  -- --libs-only --only=macos-aarch64
+```
+
+`FfiClient` auto-discovers the bundled library (or one pointed to by the
+`PHP_IMPERSONATE_LIB` environment variable).
+
 ## After running
 
 ```bash

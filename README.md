@@ -16,6 +16,50 @@ composer require hamaadraza/php-impersonate
 
 - PHP 8.0 or higher
 
+## Transports: executable vs. FFI
+
+By default PHP-Impersonate runs the bundled `curl-impersonate` **executable** —
+it works everywhere with no extra setup. There is also an optional **FFI**
+transport backed by the `libcurl-impersonate` shared library that spawns no
+process and reuses keep-alive connections between requests, so it is markedly
+faster when you make many requests.
+
+The `libcurl-impersonate` shared libraries for every supported platform ship
+**inside the package**, so the FFI transport works out of the box — nothing to
+install. Use `ClientFactory` to get the fastest transport that's available, with
+an automatic fallback to the executable:
+
+```php
+use Raza\PHPImpersonate\ClientFactory;
+
+$client = ClientFactory::create('firefox147');   // FfiClient if available, else PHPImpersonate
+$response = $client->sendGet('https://example.com');
+```
+
+`ClientFactory::create()` returns a `ClientInterface`, so the rest of your code
+is identical regardless of transport. Both implement `send*`, return the same
+`Response`, and share the same validation/header handling.
+
+The FFI transport is used automatically whenever the `ffi` extension is usable
+(always on the CLI; other SAPIs additionally need `ffi.enable` set). When it is
+not — e.g. FFI disabled on a shared host — `ClientFactory` transparently falls
+back to the executable transport, so your code keeps working either way. To
+point at a custom library build, set the `PHP_IMPERSONATE_LIB` environment
+variable.
+
+Check what would be used:
+
+```php
+use Raza\PHPImpersonate\FfiClient;
+use Raza\PHPImpersonate\ClientFactory;
+
+FfiClient::isAvailable();          // bool
+ClientFactory::preferredDriver();  // 'ffi' or 'process'
+```
+
+Note: custom `$curlOptions` are only honoured by the executable transport, so
+passing any keeps `ClientFactory` on the process driver.
+
 ## Basic Usage
 
 ```php

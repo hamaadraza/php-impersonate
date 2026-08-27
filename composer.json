@@ -40,7 +40,8 @@
     "cs-check": "@format:check",
     "update-impersonate": "@php scripts/update-impersonate.php",
     "update-browsers": "@php scripts/update-browsers.php",
-    "update-binaries": "@php scripts/update-binaries.php"
+    "update-binaries": "@php scripts/update-binaries.php",
+    "update-libraries": "@php scripts/update-binaries.php --libs-only"
   },
   "config": {
     "sort-packages": true,

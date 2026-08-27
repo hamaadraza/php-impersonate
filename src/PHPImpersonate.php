@@ -6,9 +6,11 @@ use RuntimeException;
 use InvalidArgumentException;
 use Raza\PHPImpersonate\Browser\Browser;
 use Raza\PHPImpersonate\Platform\CommandBuilder;
+use Raza\PHPImpersonate\Support\RequestPreparer;
 use Raza\PHPImpersonate\Browser\BrowserInterface;
 use Raza\PHPImpersonate\Platform\PlatformDetector;
 use Raza\PHPImpersonate\Exception\RequestException;
+use Raza\PHPImpersonate\Support\ResponseHeaderParser;
 use Raza\PHPImpersonate\Exception\PlatformNotSupportedException;
 
 /**
@@ -367,20 +369,7 @@ class PHPImpersonate implements ClientInterface
      */
     private function validateRequest(Request $request): void
     {
-        if (empty(trim($request->getUrl()))) {
-            throw new InvalidArgumentException('URL cannot be empty');
-        }
-
-        if (! filter_var($request->getUrl(), FILTER_VALIDATE_URL)) {
-            throw new InvalidArgumentException('Invalid URL format');
-        }
-
-        // FILTER_VALIDATE_URL accepts ftp://, file://localhost/..., etc.; this is
-        // an HTTP client, and passing other schemes to curl invites SSRF surprises
-        $scheme = strtolower((string) parse_url($request->getUrl(), PHP_URL_SCHEME));
-        if (! in_array($scheme, ['http', 'https'], true)) {
-            throw new InvalidArgumentException("Unsupported URL scheme \"$scheme\": only http and https are allowed");
-        }
+        RequestPreparer::validateRequest($request);
     }
 
     /**
@@ -391,27 +380,7 @@ class PHPImpersonate implements ClientInterface
         array &$headers,
         string $defaultContentType = 'application/x-www-form-urlencoded'
     ): ?string {
-        if ($data === null) {
-            return null;
-        }
-
-        // The caller's Content-Type (any casing) wins; the method default applies otherwise
-        $contentType = $this->findHeaderValue($headers, 'Content-Type');
-
-        if ($contentType === null) {
-            $headers['Content-Type'] = $defaultContentType;
-            $contentType = $defaultContentType;
-        }
-
-        if (str_contains($contentType, 'application/json')) {
-            try {
-                return json_encode($data, JSON_THROW_ON_ERROR);
-            } catch (\JsonException $e) {
-                throw new InvalidArgumentException('Failed to encode data as JSON: ' . $e->getMessage());
-            }
-        }
-
-        return http_build_query($data);
+        return RequestPreparer::prepareBody($data, $headers, $defaultContentType);
     }
 
     /**
@@ -988,49 +957,7 @@ class PHPImpersonate implements ClientInterface
      */
     private function parseHeaders(string $headersContent): array
     {
-        if (empty(trim($headersContent))) {
-            return [];
-        }
-
-        /** @var array<string, string[]> $headers */
-        $headers = [];
-
-        // Handle multiple HTTP responses (redirects) — keep only the final block.
-        $sections = preg_split('/\r?\n\r?\n/', trim($headersContent));
-
-        if (! $sections) {
-            return [];
-        }
-
-        $lastSection = end($sections);
-        $lines = explode("\n", $lastSection);
-
-        foreach ($lines as $line) {
-            $line = trim($line);
-
-            if (empty($line)) {
-                continue;
-            }
-
-            // Capture HTTP status line as a single-element list for type consistency.
-            if (str_starts_with($line, 'HTTP/')) {
-                $headers['HTTP_STATUS'] = [$line];
-
-                continue;
-            }
-
-            $colonPos = strpos($line, ':');
-            if ($colonPos !== false) {
-                $name = trim(substr($line, 0, $colonPos));
-                $value = trim(substr($line, $colonPos + 1));
-
-                if (! empty($name)) {
-                    $headers[$name][] = $value;
-                }
-            }
-        }
-
-        return $headers;
+        return ResponseHeaderParser::parse($headersContent);
     }
 
     /**
@@ -1039,11 +966,7 @@ class PHPImpersonate implements ClientInterface
      */
     private function assertHeaderIsSafe(string $name, string $value): void
     {
-        if ($name === '' || preg_match('/[\r\n\0]/', $name . $value) || str_contains($name, ':')) {
-            throw new InvalidArgumentException(
-                sprintf('Invalid header "%s": names must be non-empty without ":" and neither part may contain CR, LF, or NUL', $name)
-            );
-        }
+        RequestPreparer::assertHeaderIsSafe($name, $value);
     }
 
     /**
@@ -1052,13 +975,7 @@ class PHPImpersonate implements ClientInterface
      */
     private function findHeaderValue(array $headers, string $name): ?string
     {
-        foreach ($headers as $key => $value) {
-            if (is_string($key) && strcasecmp($key, $name) === 0) {
-                return (string)$value;
-            }
-        }
-
-        return null;
+        return RequestPreparer::findHeaderValue($headers, $name);
     }
 
     /**
@@ -1066,25 +983,6 @@ class PHPImpersonate implements ClientInterface
      */
     private function normalizeHeaders(array $headers): array
     {
-        $normalized = [];
-
-        foreach ($headers as $key => $value) {
-            if (is_int($key) && is_string($value)) {
-                // Handle "Header: Value" format
-                $colonPos = strpos($value, ':');
-                if ($colonPos !== false) {
-                    $headerName = trim(substr($value, 0, $colonPos));
-                    $headerValue = trim(substr($value, $colonPos + 1));
-
-                    if (! empty($headerName)) {
-                        $normalized[$headerName] = $headerValue;
-                    }
-                }
-            } elseif (is_string($key) && (is_string($value) || is_numeric($value))) {
-                $normalized[$key] = (string)$value;
-            }
-        }
-
-        return $normalized;
+        return RequestPreparer::normalizeHeaders($headers);
     }
 }

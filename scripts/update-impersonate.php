@@ -38,8 +38,8 @@ $dir = __DIR__;
  * Run a child script, streaming its output; return its exit code.
  */
 $run = static function (string $script, array $passthru) use ($php, $dir): int {
-    // --ref only applies to the config step; --version/--only only to binaries.
-    $binaryFlags = ['--version=', '--only='];
+    // --ref only applies to the config step; the rest only to binaries.
+    $binaryFlags = ['--version=', '--only=', '--libs', '--libs-only'];
     $configFlags = ['--ref=', '--patch-file='];
     $isConfig = str_contains($script, 'browsers');
     $filtered = array_filter($passthru, function ($a) use ($binaryFlags, $configFlags, $isConfig) {

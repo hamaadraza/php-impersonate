@@ -12,6 +12,7 @@ final class BinaryInstaller
 {
     private const REPO = 'lexiforest/curl-impersonate';
     private const RELEASE_ASSET = 'curl-impersonate-%s.%s.tar.gz';
+    private const LIB_ASSET = 'libcurl-impersonate-%s.%s.tar.gz';
 
     public function __construct(private string $binDir)
     {
@@ -113,6 +114,117 @@ final class BinaryInstaller
     public function writeVersionFile(string $version): void
     {
         file_put_contents($this->binDir . '/VERSION', $version . "\n");
+    }
+
+    /**
+     * The libcurl-impersonate shared-library asset name for a platform.
+     *
+     * @param array{triple: string, member: string, dest: string, executable: bool} $spec
+     */
+    public function libAssetName(string $version, array $spec): string
+    {
+        return sprintf(self::LIB_ASSET, $version, $spec['triple']);
+    }
+
+    /**
+     * The shared-library filename this package's FfiClient looks for in bin/<dir>.
+     */
+    public function libDestName(string $dir): string
+    {
+        if (str_starts_with($dir, 'windows')) {
+            return 'libcurl-impersonate.dll';
+        }
+        if (str_starts_with($dir, 'macos')) {
+            return 'libcurl-impersonate.dylib';
+        }
+
+        return 'libcurl-impersonate.so';
+    }
+
+    /**
+     * Download and install one platform's libcurl-impersonate shared library
+     * (for the optional FFI client). Symlinks are resolved to the real object.
+     *
+     * @param array{triple: string, member: string, dest: string, executable: bool} $spec
+     * @return array{message: string}
+     */
+    public function installLib(string $version, string $dir, array $spec): array
+    {
+        $asset = $this->libAssetName($version, $spec);
+        $url = sprintf('https://github.com/%s/releases/download/%s/%s', self::REPO, $version, $asset);
+
+        $work = $this->makeTempDir();
+
+        try {
+            $archive = $work . '/' . $asset;
+            Http::download($url, $archive);
+
+            $extractDir = $work . '/x';
+            @mkdir($extractDir);
+            $this->extract($archive, $extractDir);
+
+            $lib = $this->findRealSharedObject($extractDir, $dir);
+            if ($lib === null) {
+                throw new \RuntimeException("shared library not found inside $asset");
+            }
+
+            $destDir = $this->binDir . '/' . $dir;
+            if (! is_dir($destDir) && ! mkdir($destDir, 0755, true) && ! is_dir($destDir)) {
+                throw new \RuntimeException("Cannot create $destDir");
+            }
+            $dest = $destDir . '/' . $this->libDestName($dir);
+            if (! copy($lib, $dest)) {
+                throw new \RuntimeException("Failed to copy library into $dest");
+            }
+            @chmod($dest, 0644);
+
+            return ['message' => 'library installed (' . $this->humanSize(filesize($dest) ?: 0) . ')'];
+        } finally {
+            $this->rmrf($work);
+        }
+    }
+
+    /**
+     * Find the real (non-symlink, largest) shared object of the platform family.
+     */
+    private function findRealSharedObject(string $dir, string $platformDir): ?string
+    {
+        if (str_starts_with($platformDir, 'windows')) {
+            $pattern = '/^libcurl-impersonate\.dll$/i';
+        } elseif (str_starts_with($platformDir, 'macos')) {
+            $pattern = '/^libcurl-impersonate(\.\d+)*\.dylib$/';
+        } else {
+            $pattern = '/^libcurl-impersonate\.so(\.\d+)*$/';
+        }
+
+        $best = null;
+        $bestSize = -1;
+        $it = new \RecursiveIteratorIterator(
+            new \RecursiveDirectoryIterator($dir, \FilesystemIterator::SKIP_DOTS)
+        );
+        foreach ($it as $file) {
+            if (! $file->isFile() || $file->isLink()) {
+                continue; // skip symlinks; we want the real object
+            }
+            if (preg_match($pattern, $file->getFilename())) {
+                $size = $file->getSize();
+                if ($size > $bestSize) {
+                    $bestSize = $size;
+                    $best = $file->getPathname();
+                }
+            }
+        }
+
+        return $best;
+    }
+
+    private function humanSize(int $bytes): string
+    {
+        if ($bytes >= 1048576) {
+            return round($bytes / 1048576, 1) . ' MB';
+        }
+
+        return round($bytes / 1024, 1) . ' KB';
     }
 
     private function extract(string $archive, string $destDir): void

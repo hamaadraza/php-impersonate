@@ -16,6 +16,9 @@
  *   --version=TAG   Release tag to install (default: latest release).
  *   --only=LIST     Comma-separated platform dirs (default: all). E.g.
  *                   --only=linux-x86_64,windows-x86_64
+ *   --libs          Also install the libcurl-impersonate shared library for the
+ *                   optional FFI client (large; not committed by default).
+ *   --libs-only     Install only the shared libraries, not the executables.
  *   --dry-run       Print the plan and asset URLs; download nothing.
  *
  * Exit codes: 0 = success, 1 = error.
@@ -48,9 +51,18 @@ try {
         $platforms = array_intersect_key($platforms, array_flip($wanted));
     }
 
+    $doExe = ! $options['libs-only'];
+    /** @var bool $doLibs */
+    $doLibs = $options['libs'] || $options['libs-only'];
+
     fwrite(STDOUT, "\nPlan:\n");
     foreach ($platforms as $dir => $spec) {
-        fwrite(STDOUT, sprintf("  %-20s <- %s\n", $dir, $installer->assetName($version, $spec)));
+        if ($doExe) {
+            fwrite(STDOUT, sprintf("  %-20s <- %s\n", $dir, $installer->assetName($version, $spec)));
+        }
+        if ($doLibs) {
+            fwrite(STDOUT, sprintf("  %-20s <- %s (lib)\n", $dir, $installer->libAssetName($version, $spec)));
+        }
     }
 
     if ($options['dry-run']) {
@@ -61,9 +73,16 @@ try {
     fwrite(STDOUT, "\n");
     $results = [];
     foreach ($platforms as $dir => $spec) {
-        fwrite(STDOUT, "Installing $dir ... ");
-        $results[$dir] = $installer->install($version, $dir, $spec);
-        fwrite(STDOUT, $results[$dir]['message'] . "\n");
+        if ($doExe) {
+            fwrite(STDOUT, "Installing $dir ... ");
+            $results[$dir] = $installer->install($version, $dir, $spec);
+            fwrite(STDOUT, $results[$dir]['message'] . "\n");
+        }
+        if ($doLibs) {
+            fwrite(STDOUT, "Installing $dir library ... ");
+            $lib = $installer->installLib($version, $dir, $spec);
+            fwrite(STDOUT, $lib['message'] . "\n");
+        }
     }
 
     $installer->writeVersionFile($version);
@@ -87,10 +106,14 @@ try {
  */
 function parseArgs(array $argv): array
 {
-    $opts = ['version' => null, 'only' => null, 'dry-run' => false];
+    $opts = ['version' => null, 'only' => null, 'dry-run' => false, 'libs' => false, 'libs-only' => false];
     foreach (array_slice($argv, 1) as $arg) {
         if ($arg === '--dry-run') {
             $opts['dry-run'] = true;
+        } elseif ($arg === '--libs') {
+            $opts['libs'] = true;
+        } elseif ($arg === '--libs-only') {
+            $opts['libs-only'] = true;
         } elseif (str_starts_with($arg, '--version=')) {
             $opts['version'] = substr($arg, 10);
         } elseif (str_starts_with($arg, '--only=')) {

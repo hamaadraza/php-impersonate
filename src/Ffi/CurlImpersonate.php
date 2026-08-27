@@ -11,7 +11,7 @@ use Raza\PHPImpersonate\Exception\RequestException;
  * on a reused easy handle (so keep-alive connections are cached between calls),
  * capturing the body and headers in memory via open_memstream where available.
  *
- * This is the low-level engine behind FfiClient; it deals only in already
+ * This is the low-level FFI engine behind PHPImpersonate; it deals only in already
  * validated/normalised inputs.
  */
 final class CurlImpersonate
@@ -291,7 +291,7 @@ final class CurlImpersonate
 
     /**
      * Apply the supported subset of $curlOptions to the handle. Unknown keys are
-     * ignored here (FfiClient rejects them up front with a clear message).
+     * ignored here (PHPImpersonate rejects them up front with a clear message).
      *
      * @param \FFI\CData $h
      * @param array<string,mixed> $curlOptions

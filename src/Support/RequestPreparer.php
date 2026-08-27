@@ -10,7 +10,7 @@ use Raza\PHPImpersonate\Request;
  * normalisation, body encoding, and header-injection guards.
  *
  * Both the process-based client (PHPImpersonate) and the FFI-based client
- * (FfiClient) share this so their security-sensitive handling (CRLF rejection,
+ * (the FFI engine) share this so their security-sensitive handling (CRLF rejection,
  * scheme allow-listing, case-insensitive Content-Type) can never diverge.
  */
 final class RequestPreparer

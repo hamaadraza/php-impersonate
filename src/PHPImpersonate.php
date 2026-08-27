@@ -5,6 +5,9 @@ namespace Raza\PHPImpersonate;
 use RuntimeException;
 use InvalidArgumentException;
 use Raza\PHPImpersonate\Browser\Browser;
+use Raza\PHPImpersonate\Ffi\LibResolver;
+use Raza\PHPImpersonate\Ffi\CurlImpersonate;
+use Raza\PHPImpersonate\Browser\BrowserConfig;
 use Raza\PHPImpersonate\Platform\CommandBuilder;
 use Raza\PHPImpersonate\Support\RequestPreparer;
 use Raza\PHPImpersonate\Browser\BrowserInterface;
@@ -24,8 +27,23 @@ class PHPImpersonate implements ClientInterface
     private const MIN_TIMEOUT = 1;
     private const PROCESS_TIMEOUT_BUFFER = 5;
 
-    private BrowserInterface $browser;
+    /**
+     * Engine selection. 'auto' uses the fast in-process FFI engine when it is
+     * usable and can apply the given options, otherwise the executable engine.
+     */
+    public const ENGINE_AUTO = 'auto';
+    public const ENGINE_FFI = 'ffi';
+    public const ENGINE_PROCESS = 'process';
+
+    /** Resolved executable-backed browser (process engine only; lazy). */
+    private ?BrowserInterface $browser = null;
+    private string $browserName;
+    private string $engine;
+    private ?CurlImpersonate $ffiEngine = null;
     private array $tempFiles = [];
+
+    /** Cached one-time FFI load probe. */
+    private static ?bool $ffiProbe = null;
 
     /**
      * @param BrowserName|BrowserInterface $browser Browser to use (name or browser instance).
@@ -37,19 +55,27 @@ class PHPImpersonate implements ClientInterface
      *                                               safari155, safari170, safari172_ios, safari180, safari180_ios,
      *                                               safari184, safari184_ios, safari260, safari260_ios, safari2601, tor145
      * @param int $timeout Request timeout in seconds
-     * @param array<string,mixed> $curlOptions Custom curl options
-     * @throws RequestException If the browser is invalid or platform is not supported
-     * @throws InvalidArgumentException If timeout is invalid
+     * @param array<string,mixed> $curlOptions Custom curl options (e.g. 'proxy')
+     * @param self::ENGINE_* $engine Which engine to use; 'auto' (default) picks the
+     *                               fast FFI engine when usable, else the executable.
+     * @throws RequestException If the browser is invalid or the requested engine is unavailable
+     * @throws InvalidArgumentException If the timeout, an option, or the engine name is invalid
      */
     public function __construct(
         string|BrowserInterface $browser = self::DEFAULT_BROWSER,
         private int $timeout = self::DEFAULT_TIMEOUT,
-        private array $curlOptions = []
+        private array $curlOptions = [],
+        string $engine = self::ENGINE_AUTO
     ) {
         $this->validateTimeout($timeout);
-        $this->validatePlatform();
+        $this->engine = $this->resolveEngine($engine, $curlOptions);
         $this->initializeBrowser($browser);
-        $this->validateCurlOptions($curlOptions);
+
+        if ($this->engine === self::ENGINE_FFI) {
+            $this->assertFfiOptionsSupported($curlOptions);
+        } else {
+            $this->validateCurlOptions($curlOptions);
+        }
     }
 
     /**
@@ -67,6 +93,52 @@ class PHPImpersonate implements ClientInterface
     {
         $this->validateRequest($request);
 
+        return $this->engine === self::ENGINE_FFI
+            ? $this->sendViaFfi($request)
+            : $this->sendViaProcess($request);
+    }
+
+    /**
+     * The name of the engine this client is using: 'ffi' or 'process'.
+     */
+    public function engine(): string
+    {
+        return $this->engine;
+    }
+
+    /**
+     * Whether the fast in-process FFI engine is usable in this environment
+     * (the `ffi` extension is available and the shared library loads). Probed
+     * once and cached.
+     */
+    public static function ffiAvailable(): bool
+    {
+        if (self::$ffiProbe !== null) {
+            return self::$ffiProbe;
+        }
+        if (! CurlImpersonate::isSupported()) {
+            return self::$ffiProbe = false;
+        }
+        $lib = LibResolver::resolve();
+        if ($lib === null) {
+            return self::$ffiProbe = false;
+        }
+
+        try {
+            new CurlImpersonate($lib); // FFI::cdef + curl_easy_init
+            self::$ffiProbe = true;
+        } catch (\Throwable $e) {
+            self::$ffiProbe = false;
+        }
+
+        return self::$ffiProbe;
+    }
+
+    /**
+     * Execute a request through the executable engine.
+     */
+    private function sendViaProcess(Request $request): Response
+    {
         $tempFiles = $this->createTempFiles();
 
         try {
@@ -322,19 +394,134 @@ class PHPImpersonate implements ClientInterface
     }
 
     /**
-     * Initialize browser instance
+     * Resolve the browser. The executable-backed Browser (which locates the
+     * binary) is only created for the process engine; the FFI engine needs just
+     * the name and validates it against the known configs.
      */
     private function initializeBrowser(string|BrowserInterface $browser): void
     {
-        if (is_string($browser)) {
+        if ($browser instanceof BrowserInterface) {
+            $this->browser = $browser;
+            $this->browserName = $browser->getName();
+
+            return;
+        }
+
+        $this->browserName = $browser;
+
+        if ($this->engine === self::ENGINE_PROCESS) {
+            $this->validatePlatform();
+
             try {
                 $this->browser = new Browser($browser);
             } catch (RuntimeException $e) {
                 throw new RequestException("Invalid browser: " . $e->getMessage(), 0, $e);
             }
-        } else {
-            $this->browser = $browser;
+        } elseif (! BrowserConfig::hasConfig($browser)) {
+            throw new RequestException(sprintf(
+                "Invalid browser: '%s' is not a supported browser. Available: %s",
+                $browser,
+                implode(', ', BrowserConfig::getAvailableBrowsers())
+            ));
         }
+    }
+
+    /**
+     * Resolve the effective engine from the requested one and the given options.
+     *
+     * @param array<string,mixed> $curlOptions
+     * @return self::ENGINE_FFI|self::ENGINE_PROCESS
+     */
+    private function resolveEngine(string $requested, array $curlOptions): string
+    {
+        switch ($requested) {
+            case self::ENGINE_PROCESS:
+                return self::ENGINE_PROCESS;
+
+            case self::ENGINE_FFI:
+                if (! self::ffiAvailable()) {
+                    throw new RequestException(
+                        'The FFI engine was requested but is not available '
+                        . '(the ffi extension is disabled or the shared library is missing).'
+                    );
+                }
+
+                return self::ENGINE_FFI;
+
+            case self::ENGINE_AUTO:
+                return (self::ffiAvailable() && $this->ffiCanHandle($curlOptions))
+                    ? self::ENGINE_FFI
+                    : self::ENGINE_PROCESS;
+
+            default:
+                throw new InvalidArgumentException(
+                    "Unknown engine '$requested'. Use 'auto', 'ffi', or 'process'."
+                );
+        }
+    }
+
+    /**
+     * Whether the FFI engine can apply every supplied curl option.
+     *
+     * @param array<string,mixed> $curlOptions
+     */
+    private function ffiCanHandle(array $curlOptions): bool
+    {
+        return array_diff(array_keys($curlOptions), CurlImpersonate::supportedOptionKeys()) === [];
+    }
+
+    /**
+     * @param array<string,mixed> $curlOptions
+     * @throws InvalidArgumentException on any option the FFI engine cannot apply.
+     */
+    private function assertFfiOptionsSupported(array $curlOptions): void
+    {
+        $unsupported = array_diff(array_keys($curlOptions), CurlImpersonate::supportedOptionKeys());
+        if ($unsupported !== []) {
+            throw new InvalidArgumentException(sprintf(
+                'The FFI engine does not support the curl option(s): %s. Supported: %s. '
+                . "Use the process engine (engine: PHPImpersonate::ENGINE_PROCESS) for other options.",
+                implode(', ', $unsupported),
+                implode(', ', CurlImpersonate::supportedOptionKeys())
+            ));
+        }
+    }
+
+    /**
+     * Execute a request through the in-process FFI engine.
+     */
+    private function sendViaFfi(Request $request): Response
+    {
+        if ($this->ffiEngine === null) {
+            $lib = LibResolver::resolve();
+            if ($lib === null) {
+                throw new RequestException('libcurl-impersonate shared library not found.');
+            }
+            $this->ffiEngine = new CurlImpersonate($lib);
+        }
+
+        $headers = $this->normalizeHeaders($request->getHeaders());
+        foreach ($headers as $name => $value) {
+            $this->assertHeaderIsSafe((string) $name, (string) $value);
+        }
+
+        $result = $this->ffiEngine->request(
+            $request->getMethod(),
+            $request->getUrl(),
+            $headers,
+            $request->getBody(),
+            $this->browserName,
+            $this->timeout,
+            $this->curlOptions
+        );
+
+        $isHead = strtoupper($request->getMethod()) === 'HEAD';
+
+        return new Response(
+            $isHead ? '' : $result['body'],
+            $result['status'],
+            ResponseHeaderParser::parse($result['headers'])
+        );
     }
 
     /**

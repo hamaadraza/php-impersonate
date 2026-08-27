@@ -23,7 +23,7 @@ echo $response->json()['tls']['ja4']; // a genuine browser fingerprint
 ## Contents
 
 - [Why](#why) · [Requirements](#requirements) · [Installation](#installation) · [Quick start](#quick-start)
-- [**Two transports**](#two-transports) — [Executable](#1-executable-transport--phpimpersonate) · [FFI](#2-ffi-transport--fficlient) · [Automatic](#3-automatic-selection--clientfactory)
+- [**Two engines, one class**](#two-engines-one-class)
 - [Supported platforms](#supported-platforms)
 - [Making requests](#making-requests) · [Responses](#responses) · [Headers](#working-with-headers)
 - [Browsers](#browsers) · [Proxies](#proxies) · [Request bodies](#request-bodies) · [Timeouts](#timeouts) · [Errors](#error-handling)
@@ -41,16 +41,16 @@ that browser.
 
 - 🎭 **39 browser profiles** — Chrome, Firefox, Safari (desktop + iOS), Edge, Tor, OkHttp.
 - 🔒 **Real TLS/JA4 + HTTP/2 fingerprints**, not just a `User-Agent` string.
-- ⚡ **Two transports** — a zero-setup executable, and an optional in-process FFI
+- ⚡ **Two engines, one class** — a zero-setup executable, and an optional in-process FFI
   path that reuses connections for serious throughput.
 - 📦 **Batteries included** — binaries ship in the package for common platforms.
-- 🧩 **One clean interface** — the same `Response` and methods on every transport.
+- 🧩 **One entry point** — everything runs through the single `PHPImpersonate` class.
 
 ## Requirements
 
 - PHP **8.0+**
-- For the [FFI transport](#2-ffi-transport--fficlient): the `ffi` extension
-  (bundled with PHP; always usable on the CLI).
+- Optional, for the faster [FFI engine](#two-engines-one-class): the `ffi`
+  extension (bundled with PHP; always usable on the CLI).
 
 ## Installation
 
@@ -78,27 +78,61 @@ $data = $response->json();     // decoded JSON (throws on invalid JSON)
 
 ---
 
-## Two transports
+## Two engines, one class
 
-Every request ultimately goes through **curl-impersonate**. PHP-Impersonate can
-reach it two ways, both behind the same `ClientInterface`:
+`PHPImpersonate` is the only class you use. Under the hood it has two engines for
+reaching **curl-impersonate**, and by default it transparently picks the faster
+one that works in your environment — you never touch a second class.
 
-| | **Executable** — `PHPImpersonate` | **FFI** — `FfiClient` |
+| | **FFI engine** | **Executable engine** |
 |---|---|---|
-| How | runs the bundled `curl-impersonate` binary per request | calls `libcurl-impersonate` in-process via PHP FFI |
-| Performance | one short-lived process per request | no process spawn; **keep-alive connections reused** across requests |
-| Setup | none — works everywhere | needs the `ffi` extension usable + the shared library (bundled on common platforms) |
+| How | calls `libcurl-impersonate` in-process via PHP FFI | runs the bundled `curl-impersonate` binary per request |
+| Performance | no process spawn; **keep-alive connections reused** across requests | one short-lived process per request |
+| Requirements | the `ffi` extension usable + the shared library (bundled on common platforms) | none — works everywhere |
 | Proxies | ✅ | ✅ |
-| Other raw curl options | ✅ any curl flag | ❌ proxy options only |
-| Best for | restricted hosts, arbitrary curl flags | many requests, high throughput |
+| Other raw curl options | ❌ proxy options only | ✅ any curl flag |
 
 > [!TIP]
-> Not sure which to pick? Use [`ClientFactory`](#3-automatic-selection--clientfactory) —
-> it chooses the FFI transport when available and falls back to the executable
-> automatically, so your code is identical either way.
+> Just use `PHPImpersonate` — the default `'auto'` engine chooses **FFI** when
+> it's usable and can apply your options, otherwise the **executable**, so your
+> code is identical either way.
 
-All three entry points (`PHPImpersonate`, `FfiClient`, `ClientFactory::create()`)
-expose the same request methods and return the same [`Response`](#responses):
+```php
+use Raza\PHPImpersonate\PHPImpersonate;
+
+$response = PHPImpersonate::get('https://example.com');   // auto engine
+```
+
+**Static helpers** — one-liners for one-off requests:
+
+```php
+PHPImpersonate::get(string $url, array $headers = [], int $timeout = 30, string $browser = 'firefox147', array $curlOptions = []): Response;
+PHPImpersonate::post(string $url, ?array $data = null, array $headers = [], int $timeout = 30, string $browser = 'firefox147', array $curlOptions = []): Response;
+PHPImpersonate::put(/* … same shape as post … */): Response;
+PHPImpersonate::patch(/* … same shape as post … */): Response;
+PHPImpersonate::delete(string $url, array $headers = [], int $timeout = 30, string $browser = 'firefox147', array $curlOptions = []): Response;
+PHPImpersonate::head(/* … same shape as delete … */): Response;
+
+$response = PHPImpersonate::get('https://example.com', [], 30, 'chrome146');
+```
+
+**Instance** — reuse configuration across requests (the FFI engine keeps its
+connection alive across calls on the same instance):
+
+```php
+$client = new PHPImpersonate(
+    browser: 'firefox147',   // default; any name from BrowserName::getAll()
+    timeout: 30,             // seconds
+    curlOptions: [],         // e.g. ['proxy' => 'http://127.0.0.1:8080']
+    engine:  PHPImpersonate::ENGINE_AUTO,   // default
+);
+
+foreach ($urls as $url) {
+    $response = $client->sendGet($url);
+}
+```
+
+All request methods share one signature and return the same [`Response`](#responses):
 
 ```php
 $client->sendGet(string $url, array $headers = []): Response;
@@ -110,102 +144,24 @@ $client->sendHead(string $url, array $headers = []): Response;
 $client->send(Raza\PHPImpersonate\Request $request): Response;
 ```
 
-### 1. Executable transport — `PHPImpersonate`
+### Choosing the engine
 
-The default. Runs the bundled binary; works on any platform with no extra setup,
-and is the only transport that accepts custom curl options (proxies, etc.).
-
-**Static helpers** — one-liners for one-off requests:
+Pass `engine:` to force one, and inspect the choice when you need to:
 
 ```php
-use Raza\PHPImpersonate\PHPImpersonate;
+new PHPImpersonate('chrome146', engine: PHPImpersonate::ENGINE_FFI);      // FFI, or throw if unusable
+new PHPImpersonate('chrome146', engine: PHPImpersonate::ENGINE_PROCESS);  // always the executable
 
-PHPImpersonate::get(string $url, array $headers = [], int $timeout = 30, string $browser = 'firefox147', array $curlOptions = []): Response;
-PHPImpersonate::post(string $url, ?array $data = null, array $headers = [], int $timeout = 30, string $browser = 'firefox147', array $curlOptions = []): Response;
-PHPImpersonate::put(/* … same shape as post … */): Response;
-PHPImpersonate::patch(/* … same shape as post … */): Response;
-PHPImpersonate::delete(string $url, array $headers = [], int $timeout = 30, string $browser = 'firefox147', array $curlOptions = []): Response;
-PHPImpersonate::head(/* … same shape as delete … */): Response;
-
-// Impersonate a specific browser:
-$response = PHPImpersonate::get('https://example.com', [], 30, 'chrome146');
+PHPImpersonate::ffiAvailable();                 // is the FFI engine usable here?
+(new PHPImpersonate('chrome146'))->engine();    // 'ffi' or 'process' — what was chosen
 ```
 
-**Instance** — reuse configuration across requests:
-
-```php
-$client = new PHPImpersonate(
-    browser: 'firefox147',   // default; any name from BrowserName::getAll()
-    timeout: 30,             // seconds
-    curlOptions: [],         // e.g. ['proxy' => 'http://127.0.0.1:8080']
-);
-
-$response = $client->sendGet('https://example.com');
-```
-
-### 2. FFI transport — `FfiClient`
-
-Loads `libcurl-impersonate` directly through PHP's FFI extension. No process is
-spawned and connections are kept alive between requests on the same client, so
-it is **markedly faster** for many requests to the same host.
-
-```php
-use Raza\PHPImpersonate\FfiClient;
-
-if (FfiClient::isAvailable()) {
-    $client = new FfiClient('firefox147', timeout: 30);
-
-    // Connections are reused across these calls:
-    foreach ($urls as $url) {
-        $response = $client->sendGet($url);
-    }
-}
-```
-
-**Availability.** `FfiClient::isAvailable()` returns `true` only when the `ffi`
-extension is usable *and* the shared library loads on this platform:
-
-- `ffi` is always usable on the **CLI**; other SAPIs (FPM, Apache) additionally
-  need `ffi.enable` turned on.
-- The library ships in the package for [common platforms](#supported-platforms)
-  and is fetched on demand elsewhere. Point at a custom build with the
-  `PHP_IMPERSONATE_LIB` environment variable.
-
-**Curl options.** `FfiClient` accepts a `$curlOptions` array as its third
-argument, supporting the proxy options (`proxy`, `proxy-user`, `noproxy`) —
-`FfiClient::supportedCurlOptions()` lists them, and any other key throws. Other
-raw curl flags remain [executable-only](#1-executable-transport--phpimpersonate).
-
-```php
-$client = new FfiClient('chrome146', 30, ['proxy' => 'http://127.0.0.1:8080']);
-```
-
-### 3. Automatic selection — `ClientFactory`
-
-Prefer this in application code. It returns the fastest transport that will
-actually work here, with a transparent fallback — so you get FFI's speed where
-possible and never a broken client where it isn't.
-
-```php
-use Raza\PHPImpersonate\ClientFactory;
-
-$client = ClientFactory::create('firefox147');   // FfiClient if usable, else PHPImpersonate
-$response = $client->sendGet('https://example.com');
-
-ClientFactory::preferredDriver();  // 'ffi' or 'process' — what create() would choose
-```
-
-Selection rules for the default `'auto'` driver:
-
-- Uses **FFI** when `FfiClient::isAvailable()` and no `$curlOptions` are given.
-- Otherwise uses the **executable** (custom curl options are executable-only).
-
-Force a transport when you need to:
-
-```php
-ClientFactory::create('chrome146', 30, [], ClientFactory::DRIVER_FFI);      // FFI, or throw
-ClientFactory::create('chrome146', 30, [], ClientFactory::DRIVER_PROCESS);  // always executable
-```
+Under `'auto'`, the FFI engine is used when `PHPImpersonate::ffiAvailable()` is
+true **and** every supplied curl option is one it supports (`proxy`,
+`proxy-user`, `noproxy`); otherwise the executable engine runs. `ffiAvailable()`
+is true only when the `ffi` extension is usable — always on the CLI; other SAPIs
+also need `ffi.enable` — and the shared library loads on this platform (bundled
+for [common platforms](#supported-platforms); `PHP_IMPERSONATE_LIB` overrides it).
 
 ---
 
@@ -364,20 +320,14 @@ $response = $client->sendGet('https://example.com');
 
 ## Proxies
 
-Configure a proxy through `curlOptions` — supported on **both** transports:
+Configure a proxy through `curlOptions`. Proxy options work on **both engines**,
+so `'auto'` can still use the fast FFI engine for proxied requests:
 
 ```php
-// Executable transport
 $client = new PHPImpersonate('chrome146', 30, [
     'proxy'      => 'http://127.0.0.1:8080',   // or socks5://127.0.0.1:1080
     'proxy-user' => 'user:password',           // optional
 ]);
-
-// FFI transport (curlOptions is the 3rd argument)
-$client = new FfiClient('chrome146', 30, ['proxy' => 'http://127.0.0.1:8080']);
-
-// Or let ClientFactory pick the transport — proxy requests can use FFI too
-$client = ClientFactory::create('chrome146', 30, ['proxy' => 'http://127.0.0.1:8080']);
 
 $response = $client->sendGet('https://api.ipify.org?format=json');
 ```

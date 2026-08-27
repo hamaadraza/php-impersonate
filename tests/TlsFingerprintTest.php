@@ -7,7 +7,10 @@ use Raza\PHPImpersonate\PHPImpersonate;
 
 class TlsFingerprintTest extends TestCase
 {
-    private const TLS_FINGERPRINT_API = 'https://tls.peet.ws/api/all';
+    protected function setUp(): void
+    {
+        TestServer::requireTls($this);
+    }
 
     /**
      * Test that Chrome 99 Android sends correct TLS fingerprint
@@ -15,7 +18,7 @@ class TlsFingerprintTest extends TestCase
     public function testChrome99AndroidFingerprint()
     {
         $client = new PHPImpersonate('chrome99_android');
-        $response = $client->sendGet(self::TLS_FINGERPRINT_API);
+        $response = $client->sendGet(TestServer::tls());
 
         $this->assertEquals(200, $response->status());
 
@@ -51,7 +54,7 @@ class TlsFingerprintTest extends TestCase
     public function testChrome110Fingerprint()
     {
         $client = new PHPImpersonate('chrome110');
-        $response = $client->sendGet(self::TLS_FINGERPRINT_API);
+        $response = $client->sendGet(TestServer::tls());
 
         $this->assertEquals(200, $response->status());
 
@@ -87,7 +90,7 @@ class TlsFingerprintTest extends TestCase
     public function testChrome120Fingerprint()
     {
         $client = new PHPImpersonate('chrome120');
-        $response = $client->sendGet(self::TLS_FINGERPRINT_API);
+        $response = $client->sendGet(TestServer::tls());
 
         $this->assertEquals(200, $response->status());
 
@@ -122,7 +125,7 @@ class TlsFingerprintTest extends TestCase
     public function testFirefox133Fingerprint()
     {
         $client = new PHPImpersonate('firefox133');
-        $response = $client->sendGet(self::TLS_FINGERPRINT_API);
+        $response = $client->sendGet(TestServer::tls());
 
         $this->assertEquals(200, $response->status());
 
@@ -157,7 +160,7 @@ class TlsFingerprintTest extends TestCase
     public function testSafari153Fingerprint()
     {
         $client = new PHPImpersonate('safari153');
-        $response = $client->sendGet(self::TLS_FINGERPRINT_API);
+        $response = $client->sendGet(TestServer::tls());
 
         $this->assertEquals(200, $response->status());
 
@@ -192,7 +195,7 @@ class TlsFingerprintTest extends TestCase
     public function testSafariIosFingerprint()
     {
         $client = new PHPImpersonate('safari172_ios');
-        $response = $client->sendGet(self::TLS_FINGERPRINT_API);
+        $response = $client->sendGet(TestServer::tls());
 
         $this->assertEquals(200, $response->status());
 
@@ -228,7 +231,7 @@ class TlsFingerprintTest extends TestCase
     public function testEdge99Fingerprint()
     {
         $client = new PHPImpersonate('edge99');
-        $response = $client->sendGet(self::TLS_FINGERPRINT_API);
+        $response = $client->sendGet(TestServer::tls());
 
         $this->assertEquals(200, $response->status());
 
@@ -267,7 +270,7 @@ class TlsFingerprintTest extends TestCase
 
         foreach ($browsers as $browser) {
             $client = new PHPImpersonate($browser);
-            $response = $client->sendGet(self::TLS_FINGERPRINT_API);
+            $response = $client->sendGet(TestServer::tls());
 
             $this->assertEquals(200, $response->status());
 
@@ -300,7 +303,7 @@ class TlsFingerprintTest extends TestCase
 
             for ($attempt = 1; $attempt <= $maxRetries; $attempt++) {
                 try {
-                    $response = $client->sendGet(self::TLS_FINGERPRINT_API);
+                    $response = $client->sendGet(TestServer::tls());
 
                     if ($response->status() === 200) {
                         break;
@@ -345,7 +348,7 @@ class TlsFingerprintTest extends TestCase
     public function testTlsExtensionsAreSet()
     {
         $client = new PHPImpersonate('chrome110');
-        $response = $client->sendGet(self::TLS_FINGERPRINT_API);
+        $response = $client->sendGet(TestServer::tls());
 
         $this->assertEquals(200, $response->status());
 
@@ -378,7 +381,7 @@ class TlsFingerprintTest extends TestCase
     public function testHttp2SettingsAreConfigured()
     {
         $client = new PHPImpersonate('chrome110');
-        $response = $client->sendGet(self::TLS_FINGERPRINT_API);
+        $response = $client->sendGet(TestServer::tls());
 
         $this->assertEquals(200, $response->status());
 
@@ -410,7 +413,7 @@ class TlsFingerprintTest extends TestCase
     public function testCiphersAreConfigured()
     {
         $client = new PHPImpersonate('chrome110');
-        $response = $client->sendGet(self::TLS_FINGERPRINT_API);
+        $response = $client->sendGet(TestServer::tls());
 
         $this->assertEquals(200, $response->status());
 
@@ -439,7 +442,7 @@ class TlsFingerprintTest extends TestCase
      */
     public function testStaticMethodsWithTlsFingerprinting()
     {
-        $response = PHPImpersonate::get(self::TLS_FINGERPRINT_API, [], 30, 'chrome110');
+        $response = PHPImpersonate::get(TestServer::tls(), [], 30, 'chrome110');
 
         $this->assertEquals(200, $response->status());
 
@@ -461,7 +464,7 @@ class TlsFingerprintTest extends TestCase
     public function testPostRequestMaintainsTlsFingerprinting()
     {
         $client = new PHPImpersonate('chrome110');
-        $response = $client->sendPost(self::TLS_FINGERPRINT_API, ['test' => 'data']);
+        $response = $client->sendPost(TestServer::tls(), ['test' => 'data']);
 
         $this->assertEquals(200, $response->status());
 
@@ -486,7 +489,7 @@ class TlsFingerprintTest extends TestCase
     public function testCustomHeadersDontInterfereWithTlsFingerprinting()
     {
         $client = new PHPImpersonate('chrome110');
-        $response = $client->sendGet(self::TLS_FINGERPRINT_API, [
+        $response = $client->sendGet(TestServer::tls(), [
             'X-Custom-Header' => 'test-value',
             'Authorization' => 'Bearer test-token',
         ]);
@@ -516,7 +519,7 @@ class TlsFingerprintTest extends TestCase
     public function testTimeoutDoesntAffectTlsFingerprinting()
     {
         $client = new PHPImpersonate('chrome110', 60);
-        $response = $client->sendGet(self::TLS_FINGERPRINT_API);
+        $response = $client->sendGet(TestServer::tls());
 
         $this->assertEquals(200, $response->status());
 

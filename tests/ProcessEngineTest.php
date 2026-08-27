@@ -12,7 +12,10 @@ use Raza\PHPImpersonate\PHPImpersonate;
  */
 class ProcessEngineTest extends TestCase
 {
-    private const API = 'https://httpbun.com';
+    protected function setUp(): void
+    {
+        TestServer::requireHttpbin($this);
+    }
 
     /**
      * @param array<string,mixed> $curlOptions
@@ -29,7 +32,7 @@ class ProcessEngineTest extends TestCase
 
     public function testGetReturnsImpersonatedUserAgent(): void
     {
-        $response = $this->process('firefox147')->sendGet(self::API . '/get');
+        $response = $this->process('firefox147')->sendGet(TestServer::httpbin('/get'));
 
         $this->assertSame(200, $response->status());
         $this->assertStringContainsString('Firefox/147', $response->json()['headers']['User-Agent'] ?? '');
@@ -37,7 +40,7 @@ class ProcessEngineTest extends TestCase
 
     public function testPostJsonBody(): void
     {
-        $response = $this->process('chrome146')->sendPost(self::API . '/post', ['name' => 'x', 'n' => 2], [
+        $response = $this->process('chrome146')->sendPost(TestServer::httpbin('/post'), ['name' => 'x', 'n' => 2], [
             'Content-Type' => 'application/json',
         ]);
 
@@ -47,13 +50,13 @@ class ProcessEngineTest extends TestCase
 
     public function testCustomHeaderIsSent(): void
     {
-        $response = $this->process('chrome146')->sendGet(self::API . '/headers', ['X-Custom' => 'abc']);
+        $response = $this->process('chrome146')->sendGet(TestServer::httpbin('/headers'), ['X-Custom' => 'abc']);
         $this->assertSame('abc', $response->json()['headers']['X-Custom'] ?? null);
     }
 
     public function testHeadHasEmptyBody(): void
     {
-        $response = $this->process('chrome146')->sendHead(self::API . '/any');
+        $response = $this->process('chrome146')->sendHead(TestServer::httpbin('/anything'));
         $this->assertSame(200, $response->status());
         $this->assertSame('', $response->body());
     }
@@ -64,7 +67,7 @@ class ProcessEngineTest extends TestCase
         $body = "AB\0CDEFGH"; // 9 bytes, NUL at index 2
         $response = $this->process('chrome146')->send(new Request(
             'POST',
-            self::API . '/anything',
+            TestServer::httpbin('/anything'),
             ['Content-Type' => 'application/octet-stream'],
             $body
         ));

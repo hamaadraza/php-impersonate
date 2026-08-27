@@ -14,8 +14,6 @@ use Raza\PHPImpersonate\Exception\RequestException;
  */
 class FfiEngineTest extends TestCase
 {
-    private const API = 'https://httpbun.com';
-
     /** One-time functional probe result. */
     private static ?bool $functional = null;
 
@@ -27,7 +25,7 @@ class FfiEngineTest extends TestCase
 
         if (self::$functional === null) {
             try {
-                self::$functional = $this->ffi('chrome146')->sendGet(self::API . '/get')->status() === 200;
+                self::$functional = $this->ffi('chrome146')->sendGet(TestServer::httpbin('/get'))->status() === 200;
             } catch (\Throwable $e) {
                 self::$functional = false;
             }
@@ -52,7 +50,7 @@ class FfiEngineTest extends TestCase
 
     public function testGetReturnsImpersonatedUserAgent(): void
     {
-        $response = $this->ffi('firefox147')->sendGet(self::API . '/get');
+        $response = $this->ffi('firefox147')->sendGet(TestServer::httpbin('/get'));
 
         $this->assertSame(200, $response->status());
         $ua = $response->json()['headers']['User-Agent'] ?? '';
@@ -61,7 +59,7 @@ class FfiEngineTest extends TestCase
 
     public function testPostJsonBody(): void
     {
-        $response = $this->ffi('chrome146')->sendPost(self::API . '/post', ['name' => 'x', 'n' => 2], [
+        $response = $this->ffi('chrome146')->sendPost(TestServer::httpbin('/post'), ['name' => 'x', 'n' => 2], [
             'Content-Type' => 'application/json',
         ]);
 
@@ -71,27 +69,23 @@ class FfiEngineTest extends TestCase
 
     public function testCustomHeaderIsSent(): void
     {
-        $response = $this->ffi('chrome146')->sendGet(self::API . '/headers', ['X-Custom' => 'abc']);
+        $response = $this->ffi('chrome146')->sendGet(TestServer::httpbin('/headers'), ['X-Custom' => 'abc']);
         $this->assertSame('abc', $response->json()['headers']['X-Custom'] ?? null);
     }
 
     public function testHeadHasEmptyBody(): void
     {
-        $response = $this->ffi('chrome146')->sendHead(self::API . '/any');
+        $response = $this->ffi('chrome146')->sendHead(TestServer::httpbin('/anything'));
         $this->assertSame(200, $response->status());
         $this->assertSame('', $response->body());
     }
 
     public function testCompressedResponseIsDecoded(): void
     {
-        try {
-            $response = $this->ffi('chrome146')->sendGet('https://httpbin.org/gzip');
-        } catch (\Throwable $e) {
-            $this->markTestSkipped('httpbin.org unreachable: ' . $e->getMessage());
-        }
-        if ($response->status() !== 200) {
-            $this->markTestSkipped('httpbin.org returned ' . $response->status());
-        }
+        // httpbin serves genuinely gzip-encoded JSON here.
+        $response = $this->ffi('chrome146')->sendGet(TestServer::httpbin('/gzip'));
+
+        $this->assertSame(200, $response->status());
         $this->assertIsArray($response->json()); // json() would throw if still gzip
     }
 
@@ -99,7 +93,7 @@ class FfiEngineTest extends TestCase
     {
         $client = $this->ffi('chrome146');
         for ($i = 0; $i < 3; $i++) {
-            $this->assertSame(200, $client->sendGet(self::API . '/get')->status());
+            $this->assertSame(200, $client->sendGet(TestServer::httpbin('/get'))->status());
         }
     }
 
@@ -109,7 +103,7 @@ class FfiEngineTest extends TestCase
         $body = "AB\0CDEFGH"; // 9 bytes, NUL at index 2
         $response = $this->ffi('chrome146')->send(new Request(
             'POST',
-            self::API . '/anything',
+            TestServer::httpbin('/anything'),
             ['Content-Type' => 'application/octet-stream'],
             $body
         ));
@@ -124,6 +118,6 @@ class FfiEngineTest extends TestCase
         $client = $this->ffi('chrome146', 5, ['proxy' => 'http://127.0.0.1:9']);
 
         $this->expectException(RequestException::class);
-        $client->sendGet(self::API . '/get');
+        $client->sendGet(TestServer::httpbin('/get'));
     }
 }

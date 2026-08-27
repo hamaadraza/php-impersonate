@@ -18,8 +18,6 @@ use PHPUnit\Framework\Attributes\DataProvider;
  */
 class EngineParityTest extends TestCase
 {
-    private const TLS_API = 'https://tls.peet.ws/api/all';
-
     protected function setUp(): void
     {
         if (! PHPImpersonate::ffiAvailable()) {
@@ -57,10 +55,12 @@ class EngineParityTest extends TestCase
 
     public function testGetWithBodyKeepsMethodOnBothEngines(): void
     {
+        TestServer::requireHttpbin($this);
+
         // A body must not silently promote GET to POST on either engine (B5).
         $method = function (string $engine): string {
             $r = (new PHPImpersonate('chrome146', 30, [], $engine))
-                ->send(new Request('GET', 'https://httpbun.com/anything', [], 'q=1'));
+                ->send(new Request('GET', TestServer::httpbin('/anything'), [], 'q=1'));
 
             return $r->json()['method'] ?? '';
         };
@@ -73,12 +73,12 @@ class EngineParityTest extends TestCase
     {
         try {
             $ja4 = (new PHPImpersonate($browser, 30, [], $engine))
-                ->sendGet(self::TLS_API)->json()['tls']['ja4'] ?? null;
+                ->sendGet(TestServer::tls())->json()['tls']['ja4'] ?? null;
         } catch (\Throwable $e) {
-            $this->markTestSkipped('tls.peet.ws unreachable: ' . $e->getMessage());
+            $this->markTestSkipped('TLS-fingerprint service unreachable: ' . $e->getMessage());
         }
         if (! is_string($ja4) || $ja4 === '') {
-            $this->markTestSkipped('tls.peet.ws returned no JA4');
+            $this->markTestSkipped('TLS-fingerprint service returned no JA4');
         }
 
         return $ja4;

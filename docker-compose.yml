@@ -1,0 +1,15 @@
+# Local test services for php-impersonate.
+#
+#   docker compose up -d httpbin
+#   HTTPBIN_URL=http://localhost:8080 composer test
+#
+# httpbin is the HTTP request/response echo service the behaviour tests talk to
+# (the same one that runs at httpbin.org). Running it locally makes the test
+# suite fast, reliable and offline-capable instead of depending on public
+# services that regularly go down.
+services:
+  httpbin:
+    image: kennethreitz/httpbin
+    ports:
+      - "8080:80"
+    restart: unless-stopped

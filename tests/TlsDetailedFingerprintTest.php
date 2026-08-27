@@ -7,7 +7,10 @@ use Raza\PHPImpersonate\PHPImpersonate;
 
 class TlsDetailedFingerprintTest extends TestCase
 {
-    private const TLS_FINGERPRINT_API = 'https://tls.peet.ws/api/all';
+    protected function setUp(): void
+    {
+        TestServer::requireTls($this);
+    }
 
     /**
      * Test Chrome 110 specific TLS fingerprint details
@@ -15,7 +18,7 @@ class TlsDetailedFingerprintTest extends TestCase
     public function testChrome110DetailedFingerprint()
     {
         $client = new PHPImpersonate('chrome110');
-        $response = $client->sendGet(self::TLS_FINGERPRINT_API);
+        $response = $client->sendGet(TestServer::tls());
 
         $this->assertEquals(200, $response->status());
 
@@ -53,7 +56,7 @@ class TlsDetailedFingerprintTest extends TestCase
     public function testChrome99AndroidDetailedFingerprint()
     {
         $client = new PHPImpersonate('chrome99_android');
-        $response = $client->sendGet(self::TLS_FINGERPRINT_API);
+        $response = $client->sendGet(TestServer::tls());
 
         $this->assertEquals(200, $response->status());
 
@@ -92,7 +95,7 @@ class TlsDetailedFingerprintTest extends TestCase
     public function testFirefox133DetailedFingerprint()
     {
         $client = new PHPImpersonate('firefox133');
-        $response = $client->sendGet(self::TLS_FINGERPRINT_API);
+        $response = $client->sendGet(TestServer::tls());
 
         $this->assertEquals(200, $response->status());
 
@@ -130,7 +133,7 @@ class TlsDetailedFingerprintTest extends TestCase
     public function testSafari153DetailedFingerprint()
     {
         $client = new PHPImpersonate('safari153');
-        $response = $client->sendGet(self::TLS_FINGERPRINT_API);
+        $response = $client->sendGet(TestServer::tls());
 
         $this->assertEquals(200, $response->status());
 
@@ -173,7 +176,7 @@ class TlsDetailedFingerprintTest extends TestCase
         $fingerprints = [];
 
         for ($i = 0; $i < 3; $i++) {
-            $response = $client->sendGet(self::TLS_FINGERPRINT_API);
+            $response = $client->sendGet(TestServer::tls());
             $this->assertEquals(200, $response->status());
 
             $data = $response->json();
@@ -202,7 +205,7 @@ class TlsDetailedFingerprintTest extends TestCase
         $fingerprints = [];
 
         for ($i = 0; $i < 3; $i++) {
-            $response = $client->sendGet(self::TLS_FINGERPRINT_API);
+            $response = $client->sendGet(TestServer::tls());
             $this->assertEquals(200, $response->status());
 
             $data = $response->json();
@@ -238,7 +241,7 @@ class TlsDetailedFingerprintTest extends TestCase
 
         foreach ($browsers as $browser => $browserName) {
             $client = new PHPImpersonate($browser);
-            $response = $client->sendGet(self::TLS_FINGERPRINT_API);
+            $response = $client->sendGet(TestServer::tls());
 
             $this->assertEquals(200, $response->status());
 
@@ -265,7 +268,7 @@ class TlsDetailedFingerprintTest extends TestCase
     public function testChromeExtensionOrder()
     {
         $client = new PHPImpersonate('chrome110');
-        $response = $client->sendGet(self::TLS_FINGERPRINT_API);
+        $response = $client->sendGet(TestServer::tls());
 
         $this->assertEquals(200, $response->status());
 
@@ -301,7 +304,7 @@ class TlsDetailedFingerprintTest extends TestCase
 
         foreach ($browsers as $browser) {
             $client = new PHPImpersonate($browser);
-            $response = $client->sendGet(self::TLS_FINGERPRINT_API);
+            $response = $client->sendGet(TestServer::tls());
 
             $this->assertEquals(200, $response->status());
 

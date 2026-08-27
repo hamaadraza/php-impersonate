@@ -85,6 +85,16 @@ jobs:
         run: |
           php -r 'echo "OS: " . PHP_OS . PHP_EOL . "Arch: " . php_uname("m") . PHP_EOL;'
 
+      # Run httpbin locally so the HTTP behaviour tests don't depend on flaky
+      # public services. Linux runners have Docker; on Windows/macOS the tests
+      # fall back to the public service and skip gracefully if it is unreachable.
+      - name: Start local httpbin (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          docker run -d --name httpbin -p 8080:80 kennethreitz/httpbin
+          for i in $(seq 1 30); do curl -sf http://localhost:8080/status/200 >/dev/null && break || sleep 1; done
+          echo "HTTPBIN_URL=http://localhost:8080" >> "$GITHUB_ENV"
+
       - name: Execute tests
         run: vendor/bin/pest --ci
 
@@ -123,7 +133,14 @@ jobs:
 
       - name: Run tests in Docker
         run: |
+          # Local httpbin on a shared network so the containerised tests reach it
+          # by hostname instead of depending on public services.
+          docker network create testnet
+          docker run -d --name httpbin --network testnet kennethreitz/httpbin
+          for i in $(seq 1 30); do docker run --rm --network testnet curlimages/curl -sf http://httpbin:80/status/200 >/dev/null 2>&1 && break || sleep 1; done
           docker run --rm --platform ${{ matrix.platform }} \
+            --network testnet \
+            -e HTTPBIN_URL=http://httpbin:80 \
             -v "${{ github.workspace }}:/app" \
             -w /app \
             ${{ matrix.image }} \
@@ -194,6 +211,12 @@ jobs:
 
       - name: Install platform curl-impersonate binaries
         run: php bin/php-impersonate-install
+
+      - name: Start local httpbin
+        run: |
+          docker run -d --name httpbin -p 8080:80 kennethreitz/httpbin
+          for i in $(seq 1 30); do curl -sf http://localhost:8080/status/200 >/dev/null && break || sleep 1; done
+          echo "HTTPBIN_URL=http://localhost:8080" >> "$GITHUB_ENV"
 
       - name: Execute tests
         run: vendor/bin/pest --ci

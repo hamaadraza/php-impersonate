@@ -7,7 +7,10 @@ use Raza\PHPImpersonate\PHPImpersonate;
 
 class TlsApiConnectionTest extends TestCase
 {
-    private const TLS_FINGERPRINT_API = 'https://tls.peet.ws/api/all';
+    protected function setUp(): void
+    {
+        TestServer::requireTls($this);
+    }
 
     /**
      * Test basic connection to TLS fingerprinting API
@@ -15,7 +18,7 @@ class TlsApiConnectionTest extends TestCase
     public function testBasicConnection()
     {
         $client = new PHPImpersonate();
-        $response = $client->sendGet(self::TLS_FINGERPRINT_API);
+        $response = $client->sendGet(TestServer::tls());
 
         $this->assertEquals(200, $response->status());
         $this->assertNotEmpty($response->body());
@@ -33,7 +36,7 @@ class TlsApiConnectionTest extends TestCase
     public function testApiResponseStructure()
     {
         $client = new PHPImpersonate('chrome110');
-        $response = $client->sendGet(self::TLS_FINGERPRINT_API);
+        $response = $client->sendGet(TestServer::tls());
 
         $this->assertEquals(200, $response->status());
 
@@ -97,19 +100,19 @@ class TlsApiConnectionTest extends TestCase
         $client = new PHPImpersonate('chrome110');
 
         // Test GET
-        $response = $client->sendGet(self::TLS_FINGERPRINT_API);
+        $response = $client->sendGet(TestServer::tls());
         $this->assertEquals(200, $response->status());
         $data = $response->json();
         $this->assertEquals('GET', $data['method']);
 
         // Test POST
-        $response = $client->sendPost(self::TLS_FINGERPRINT_API, ['test' => 'data']);
+        $response = $client->sendPost(TestServer::tls(), ['test' => 'data']);
         $this->assertEquals(200, $response->status());
         $data = $response->json();
         $this->assertEquals('POST', $data['method']);
 
         // Test HEAD
-        $response = $client->sendHead(self::TLS_FINGERPRINT_API);
+        $response = $client->sendHead(TestServer::tls());
         $this->assertEquals(200, $response->status());
     }
 
@@ -124,7 +127,7 @@ class TlsApiConnectionTest extends TestCase
             'X-Another-Header' => 'another-value',
         ];
 
-        $response = $client->sendGet(self::TLS_FINGERPRINT_API, $customHeaders);
+        $response = $client->sendGet(TestServer::tls(), $customHeaders);
         $this->assertEquals(200, $response->status());
 
         $data = $response->json();
@@ -149,7 +152,7 @@ class TlsApiConnectionTest extends TestCase
 
         // Test multiple requests to ensure API is stable
         for ($i = 0; $i < 3; $i++) {
-            $response = $client->sendGet(self::TLS_FINGERPRINT_API);
+            $response = $client->sendGet(TestServer::tls());
             $this->assertEquals(200, $response->status());
 
             $data = $response->json();
@@ -180,7 +183,7 @@ class TlsApiConnectionTest extends TestCase
     public function testDefaultBrowser()
     {
         $client = new PHPImpersonate(); // Uses default browser
-        $response = $client->sendGet(self::TLS_FINGERPRINT_API);
+        $response = $client->sendGet(TestServer::tls());
 
         $this->assertEquals(200, $response->status());
 

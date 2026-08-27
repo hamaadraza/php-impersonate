@@ -408,6 +408,21 @@ See [scripts/README.md](scripts/README.md) for per-step commands and details.
 composer test
 ```
 
+The behaviour tests talk to an [httpbin](https://httpbin.org) instance. For a
+fast, reliable, offline run, start one locally instead of hitting the public
+service:
+
+```bash
+composer test-server-up                          # docker compose up -d httpbin
+HTTPBIN_URL=http://localhost:8080 composer test
+composer test-server-down                        # when you're done
+```
+
+Any test whose service is unreachable **skips** rather than fails, so an outage
+never breaks the suite. The TLS-fingerprint tests use an external service
+(`tls.peet.ws`, override with `TLS_FINGERPRINT_URL`) since httpbin can't report
+JA3/JA4; they skip too when it's unavailable.
+
 ## License
 
 MIT — see [LICENSE.md](LICENSE.md).

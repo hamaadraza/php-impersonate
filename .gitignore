@@ -30,3 +30,10 @@ phpstan.neon
 psalm.xml
 testbench.yaml
 /coverage
+
+# Non-mainstream platform artifacts fetched on demand by bin/php-impersonate-install.
+# Committed: linux-x86_64 (glibc), macos-aarch64 (Apple Silicon), windows-x86_64.
+/bin/linux-x86_64-musl/
+/bin/linux-aarch64/
+/bin/linux-aarch64-musl/
+/bin/macos-x86_64/

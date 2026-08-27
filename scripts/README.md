@@ -58,6 +58,14 @@ The installed version is recorded in `bin/VERSION`. The host-platform binary is
 verified by running `--version` (it must report `IMPERSONATE`); cross-platform
 binaries can't be executed on the host, so verify those on their target OS.
 
+**Only the common platforms are committed** (`linux-x86_64`, `macos-aarch64`,
+`windows-x86_64`); the others are git-ignored and fetched on demand. End users on
+a non-bundled platform (musl, Linux ARM64, Intel macOS) run the user-facing
+installer once — see [bin/php-impersonate-install](../bin/php-impersonate-install)
+or `composer install-binaries`. When refreshing the committed set for a new
+release, run `composer update-binaries -- --libs` and re-commit only those three
+directories.
+
 #### Shared libraries for the FFI client (`--libs`)
 
 The FFI transport ([FfiClient](../src/FfiClient.php)) uses the

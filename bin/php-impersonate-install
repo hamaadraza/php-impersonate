@@ -1,0 +1,92 @@
+#!/usr/bin/env php
+<?php
+
+/**
+ * Download the curl-impersonate binary (and shared library) for the CURRENT
+ * platform into this package's bin/ directory.
+ *
+ * The package ships binaries for mainstream x86_64 platforms (Linux glibc,
+ * macOS, Windows) only. On any other platform — Linux musl/Alpine, ARM64, Apple
+ * Silicon — run this once after install to fetch the matching artifacts:
+ *
+ *   php vendor/hamaadraza/php-impersonate/bin/php-impersonate-install
+ *   # or, from a clone of this package:
+ *   php bin/php-impersonate-install
+ *
+ * Options:
+ *   --no-libs        Fetch only the executable, not the FFI shared library.
+ *   --force          Re-download even if the files already exist.
+ *   --version=TAG    Install a specific release (default: the bundled bin/VERSION).
+ *
+ * Exit codes: 0 = installed or already present, 1 = error/unsupported platform.
+ */
+
+declare(strict_types=1);
+
+use Raza\PHPImpersonate\Platform\PlatformDetector;
+use Raza\PHPImpersonate\Scripts\Http;
+use Raza\PHPImpersonate\Scripts\BinaryInstaller;
+
+$root = dirname(__DIR__);
+
+// Self-contained: require only what we need so this works with or without the
+// project autoloader present.
+require $root . '/src/Platform/PlatformDetector.php';
+require $root . '/scripts/lib/Http.php';
+require $root . '/scripts/lib/BinaryInstaller.php';
+
+$opts = ['no-libs' => false, 'force' => false, 'version' => null];
+foreach (array_slice($argv, 1) as $arg) {
+    if ($arg === '--no-libs') {
+        $opts['no-libs'] = true;
+    } elseif ($arg === '--force') {
+        $opts['force'] = true;
+    } elseif (str_starts_with($arg, '--version=')) {
+        $opts['version'] = substr($arg, 10);
+    } else {
+        fwrite(STDERR, "Unknown option: $arg\n");
+        exit(1);
+    }
+}
+
+try {
+    $installer = new BinaryInstaller($root . '/bin');
+    $dir = PlatformDetector::getBinaryDirSuffix();
+
+    $map = $installer->platformMap();
+    if (! isset($map[$dir])) {
+        fwrite(STDERR, "Unsupported platform '$dir'. No prebuilt curl-impersonate is available for it.\n");
+        exit(1);
+    }
+    $spec = $map[$dir];
+
+    $version = $opts['version']
+        ?? (is_file($root . '/bin/VERSION') ? trim((string) file_get_contents($root . '/bin/VERSION')) : null)
+        ?: $installer->latestReleaseTag();
+
+    $binPath = $root . "/bin/$dir/" . $spec['dest'];
+    $libPath = $root . "/bin/$dir/" . $installer->libDestName($dir);
+    $haveBin = is_file($binPath);
+    $haveLib = $opts['no-libs'] || is_file($libPath);
+
+    if (! $opts['force'] && $haveBin && $haveLib) {
+        fwrite(STDOUT, "curl-impersonate is already installed for $dir ($version). Nothing to do.\n");
+        exit(0);
+    }
+
+    fwrite(STDOUT, "Installing curl-impersonate $version for $dir ...\n");
+
+    $result = $installer->install($version, $dir, $spec);
+    fwrite(STDOUT, '  binary:  ' . $result['message'] . "\n");
+
+    if (! $opts['no-libs']) {
+        $lib = $installer->installLib($version, $dir, $spec);
+        fwrite(STDOUT, '  library: ' . $lib['message'] . "\n");
+    }
+
+    fwrite(STDOUT, "Done.\n");
+    exit(0);
+} catch (\Throwable $e) {
+    fwrite(STDERR, 'Error: ' . $e->getMessage() . "\n");
+    exit(1);
+}

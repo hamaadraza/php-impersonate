@@ -97,7 +97,9 @@ class Browser implements BrowserInterface
         }
 
         throw new RuntimeException(sprintf(
-            "curl-impersonate binary not found for %s. Checked paths: %s",
+            "curl-impersonate binary not found for %s. This platform is not bundled; "
+            . "run `php vendor/hamaadraza/php-impersonate/bin/php-impersonate-install` "
+            . "(or `composer install-binaries` from this package) to download it. Checked paths: %s",
             PlatformDetector::getPlatformDescription(),
             implode(', ', array_filter($paths))
         ));

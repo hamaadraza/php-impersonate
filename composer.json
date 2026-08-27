@@ -22,6 +22,9 @@
     "pestphp/pest": "^3.0",
     "friendsofphp/php-cs-fixer": "^3.21.1"
   },
+  "bin": [
+    "bin/php-impersonate-install"
+  ],
   "autoload": {
     "psr-4": {
       "Raza\\PHPImpersonate\\": "src"
@@ -41,7 +44,8 @@
     "update-impersonate": "@php scripts/update-impersonate.php",
     "update-browsers": "@php scripts/update-browsers.php",
     "update-binaries": "@php scripts/update-binaries.php",
-    "update-libraries": "@php scripts/update-binaries.php --libs-only"
+    "update-libraries": "@php scripts/update-binaries.php --libs-only",
+    "install-binaries": "@php bin/php-impersonate-install"
   },
   "config": {
     "sort-packages": true,

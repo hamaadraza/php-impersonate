@@ -16,6 +16,38 @@ composer require hamaadraza/php-impersonate
 
 - PHP 8.0 or higher
 
+## Supported platforms
+
+The package ships prebuilt `curl-impersonate` binaries (and FFI libraries) for
+the most common platforms, so they work with no extra steps:
+
+- Linux x86_64 (glibc)
+- macOS ARM64 (Apple Silicon)
+- Windows x86_64
+
+On any other platform — Linux musl/Alpine, Linux ARM64, or Intel macOS (x86_64)
+— run the installer once after `composer require` to download the matching
+binary and library:
+
+```bash
+php vendor/hamaadraza/php-impersonate/bin/php-impersonate-install
+```
+
+To wire it into your own project so it runs automatically, add it to your root
+`composer.json` (dependency scripts do not run on their own):
+
+```json
+{
+  "scripts": {
+    "post-install-cmd": ["@php vendor/hamaadraza/php-impersonate/bin/php-impersonate-install"],
+    "post-update-cmd":  ["@php vendor/hamaadraza/php-impersonate/bin/php-impersonate-install"]
+  }
+}
+```
+
+The installer is a no-op when the current platform is already bundled. Pass
+`--no-libs` to skip the (larger) FFI library, or `--force` to re-download.
+
 ## Transports: executable vs. FFI
 
 By default PHP-Impersonate runs the bundled `curl-impersonate` **executable** —
@@ -24,10 +56,11 @@ transport backed by the `libcurl-impersonate` shared library that spawns no
 process and reuses keep-alive connections between requests, so it is markedly
 faster when you make many requests.
 
-The `libcurl-impersonate` shared libraries for every supported platform ship
-**inside the package**, so the FFI transport works out of the box — nothing to
-install. Use `ClientFactory` to get the fastest transport that's available, with
-an automatic fallback to the executable:
+The `libcurl-impersonate` shared library ships **inside the package** for the
+common platforms (see [Supported platforms](#supported-platforms)), so the FFI
+transport works out of the box there; on other platforms the installer above
+fetches it. Use `ClientFactory` to get the fastest transport that's available,
+with an automatic fallback to the executable:
 
 ```php
 use Raza\PHPImpersonate\ClientFactory;

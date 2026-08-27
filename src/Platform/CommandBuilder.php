@@ -322,10 +322,17 @@ class CommandBuilder
 
         $platform = PlatformDetector::getPlatform();
 
-        // cmd.exe's command line is limited to 8191 chars; Unix ARG_MAX is far larger
-        if ($platform === PlatformDetector::PLATFORM_WINDOWS && strlen($stringValue) > 8191) {
+        // Bound the argument length before escaping. Windows is limited by the
+        // cmd.exe command line (~8191 chars). On Unix the practical ceiling is
+        // escapeshellarg() itself: on musl libc it throws a ValueError past
+        // 131072 bytes (glibc tolerates more), so cap there to fail with our own
+        // RuntimeException uniformly instead of an uncaught error on Alpine.
+        // (The request path builds argv arrays via buildCommandArgs(), which
+        // needs no shell escaping, so real requests are unaffected by this cap.)
+        $maxLength = $platform === PlatformDetector::PLATFORM_WINDOWS ? 8191 : 131072;
+        if (strlen($stringValue) > $maxLength) {
             throw new RuntimeException(
-                sprintf('Argument too long (%d chars): %s...', strlen($stringValue), substr($stringValue, 0, 100))
+                sprintf('Argument too long (%d bytes): %s...', strlen($stringValue), substr($stringValue, 0, 100))
             );
         }
 

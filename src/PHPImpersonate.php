@@ -81,13 +81,17 @@ class PHPImpersonate implements ClientInterface
 
             $result = $this->runCommand($command);
 
+            // HEAD responses have no body; with --head the output file holds the
+            // header block instead, so don't present it as a body
+            $isHead = strtoupper($request->getMethod()) === 'HEAD';
+
             // On Windows with .bat files, the output might not be written to files properly
             // So we capture the response directly from the command output
-            $responseBody = $this->readTempFile($tempFiles['body']);
+            $responseBody = $isHead ? '' : $this->readTempFile($tempFiles['body']);
             $extractedStatus = null;
 
             // If the temp file is empty, try to get response from command output
-            if (empty($responseBody) && ! empty($result['output'])) {
+            if (! $isHead && empty($responseBody) && ! empty($result['output'])) {
                 $extracted = $this->captureResponseFromOutput($result['output']);
                 $responseBody = $extracted['body'];
                 $extractedStatus = $extracted['status'];
@@ -375,8 +379,8 @@ class PHPImpersonate implements ClientInterface
             return null;
         }
 
-        $contentType = $headers['Content-Type'] ?? null;
-        $isJson = $contentType && str_contains($contentType, 'application/json');
+        $contentType = $this->findHeaderValue($headers, 'Content-Type');
+        $isJson = $contentType !== null && str_contains($contentType, 'application/json');
 
         if ($isJson) {
             try {
@@ -386,8 +390,8 @@ class PHPImpersonate implements ClientInterface
             }
         }
 
-        // Set default content type if not specified
-        if (! isset($headers['Content-Type'])) {
+        // Set default content type if not specified (under any casing)
+        if ($contentType === null) {
             $headers['Content-Type'] = $defaultContentType;
         }
 
@@ -438,8 +442,8 @@ class PHPImpersonate implements ClientInterface
             throw new RequestException('Created temporary file is not writable');
         }
 
-        // Set safe permissions
-        if (! chmod($tempFile, 0644)) {
+        // Owner-only: these files hold request/response bodies and headers (cookies, tokens)
+        if (! chmod($tempFile, 0600)) {
             @unlink($tempFile);
 
             throw new RequestException('Unable to set temporary file permissions');
@@ -508,8 +512,10 @@ class PHPImpersonate implements ClientInterface
      * Extract HTTP status code from response headers.
      *
      * @param array<string, string[]> $headers
+     * @return string|null Null when no status line is present — callers must not
+     *                     assume success in that case.
      */
-    private function extractStatusFromHeaders(array $headers): string
+    private function extractStatusFromHeaders(array $headers): ?string
     {
         if (isset($headers['HTTP_STATUS'][0])) {
             if (preg_match('/(\d{3})/', $headers['HTTP_STATUS'][0], $matches)) {
@@ -525,7 +531,7 @@ class PHPImpersonate implements ClientInterface
             }
         }
 
-        return '200';
+        return null;
     }
 
     /**
@@ -624,8 +630,15 @@ class PHPImpersonate implements ClientInterface
             'max-time' => $this->timeout,
             'o' => $outputFile, // output file
             'D' => $headerFile, // dump headers file
-            'X' => $method, // HTTP method
         ];
+
+        if (strtoupper($method) === 'HEAD') {
+            // -X HEAD makes curl wait for a body the server never sends and can
+            // hang until max-time on keep-alive connections; --head is correct
+            $options['head'] = true;
+        } else {
+            $options['X'] = $method; // HTTP method
+        }
 
         // Handle SSL CA certificates based on platform
         $this->addSslCertOptions($options);
@@ -737,7 +750,7 @@ class PHPImpersonate implements ClientInterface
      */
     private function addBodyToOptions(array &$options, string $body, array $headers): array
     {
-        $contentType = $headers['Content-Type'] ?? '';
+        $contentType = $this->findHeaderValue($headers, 'Content-Type') ?? '';
         $isJson = str_contains($contentType, 'application/json');
 
         // Always use temporary files for large data to avoid command line length limits
@@ -994,6 +1007,21 @@ class PHPImpersonate implements ClientInterface
         }
 
         return $headers;
+    }
+
+    /**
+     * Find a header value by name, case-insensitively (header names are
+     * case-insensitive per RFC 9110 §5.1).
+     */
+    private function findHeaderValue(array $headers, string $name): ?string
+    {
+        foreach ($headers as $key => $value) {
+            if (is_string($key) && strcasecmp($key, $name) === 0) {
+                return (string)$value;
+            }
+        }
+
+        return null;
     }
 
     /**

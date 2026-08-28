@@ -74,7 +74,8 @@ final class CurlProcess
             $extractedStatus = null;
 
             // stdout only (never stderr — warnings there must not become a body).
-            if (! $isHead && empty($responseBody) && ! empty($result['stdout'])) {
+            // Strict '' check: a body of exactly "0" is falsy but is a real body.
+            if (! $isHead && $responseBody === '' && ! empty($result['stdout'])) {
                 $extracted = $this->captureResponseFromOutput($result['stdout']);
                 $responseBody = $extracted['body'];
                 $extractedStatus = $extracted['status'];
@@ -83,7 +84,8 @@ final class CurlProcess
             $rawHeaders = $this->readTempFile($tempFiles['headers']);
 
             // If we still don't have a proper status code, try the headers.
-            if ($extractedStatus === '0' || $extractedStatus === 0) {
+            // captureResponseFromOutput() reports an unknown status as the string '0'.
+            if ($extractedStatus === '0') {
                 $extractedStatus = $this->extractStatusFromHeaders(ResponseHeaderParser::parse($rawHeaders));
             }
 
@@ -222,7 +224,7 @@ final class CurlProcess
     }
 
     /**
-     * @param array<int,string> $files
+     * @param array<array-key,string> $files
      */
     private function cleanupTempFiles(array $files): void
     {
@@ -571,8 +573,8 @@ final class CurlProcess
         $lastLine = end($outputLines) ?: '';
         $statusCode = is_numeric($lastLine) ? $lastLine : '0';
 
-        $hasValidStatusCode = is_numeric($statusCode) &&
-            ((int) $statusCode >= 100 && (int) $statusCode < 600);
+        // $statusCode is always a numeric string here; only the range needs checking.
+        $hasValidStatusCode = (int) $statusCode >= 100 && (int) $statusCode < 600;
 
         if ($exitCode !== 0 && ! $hasValidStatusCode) {
             $allOutput = array_merge($outputLines, $errorLines);

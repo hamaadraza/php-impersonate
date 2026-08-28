@@ -19,8 +19,10 @@
     "php": "^8"
   },
   "require-dev": {
+    "friendsofphp/php-cs-fixer": "^3.21.1",
     "pestphp/pest": "^3.0",
-    "friendsofphp/php-cs-fixer": "^3.21.1"
+    "phpstan/extension-installer": "^1.4",
+    "phpstan/phpstan": "^2.2"
   },
   "bin": [
     "bin/php-impersonate-install"
@@ -38,6 +40,7 @@
   "scripts": {
     "test": "vendor/bin/pest",
     "test-coverage": "vendor/bin/pest --coverage",
+    "analyse": "vendor/bin/phpstan analyse",
     "test-server-up": "docker compose up -d httpbin",
     "test-server-down": "docker compose down",
     "format": "vendor/bin/php-cs-fixer fix --config=.php-cs-fixer.dist.php --allow-risky=yes",

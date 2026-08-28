@@ -61,6 +61,16 @@ class ProcessEngineTest extends TestCase
         $this->assertSame('', $response->body());
     }
 
+    public function testFalsyBodyIsPreserved(): void
+    {
+        // A body of exactly "0" is falsy in PHP; it must not be mistaken for
+        // "no body" and replaced via the stdout-recovery path (regression).
+        $response = $this->process('chrome146')->sendGet(TestServer::httpbin('/base64/MA==')); // decodes to "0"
+
+        $this->assertSame(200, $response->status());
+        $this->assertSame('0', $response->body());
+    }
+
     public function testBinaryBodyIsSentVerbatim(): void
     {
         // A body with an embedded NUL byte must not be truncated (regression: B1).

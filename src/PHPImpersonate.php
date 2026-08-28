@@ -57,9 +57,17 @@ class PHPImpersonate implements ClientInterface
      * per-config key prevents a connection (and its TLS fingerprint) from being
      * reused across different browsers. See {@see ffiEngine()}.
      *
+     * Bounded to {@see MAX_FFI_ENGINES} entries (least recently used evicted
+     * first): each entry pins a curl handle plus its kept-alive connections, and
+     * callers can mint unlimited distinct keys (e.g. a new proxy per request),
+     * which in a long-running worker would otherwise grow without limit.
+     *
      * @var array<string, CurlImpersonate>
      */
     private static array $ffiEngines = [];
+
+    /** Upper bound on cached FFI engines; see {@see $ffiEngines}. */
+    private const MAX_FFI_ENGINES = 16;
 
     /**
      * @param BrowserName|BrowserInterface $browser Browser to use (name or browser instance).
@@ -351,7 +359,29 @@ class PHPImpersonate implements ClientInterface
 
         $key = $lib . "\0" . $this->browserName . "\0" . serialize($this->curlOptions);
 
-        return self::$ffiEngines[$key] ??= new CurlImpersonate($lib);
+        if (isset(self::$ffiEngines[$key])) {
+            // LRU touch: re-append so the least recently used entry evicts first.
+            $engine = self::$ffiEngines[$key];
+            unset(self::$ffiEngines[$key]);
+
+            return self::$ffiEngines[$key] = $engine;
+        }
+
+        while (count(self::$ffiEngines) >= self::MAX_FFI_ENGINES) {
+            unset(self::$ffiEngines[array_key_first(self::$ffiEngines)]);
+        }
+
+        return self::$ffiEngines[$key] = new CurlImpersonate($lib);
+    }
+
+    /**
+     * Close every cached FFI engine, releasing their curl handles and any
+     * kept-alive connections. Engines are recreated lazily on the next FFI
+     * request; useful between batches in long-running workers.
+     */
+    public static function closeFfiEngines(): void
+    {
+        self::$ffiEngines = [];
     }
 
     /**

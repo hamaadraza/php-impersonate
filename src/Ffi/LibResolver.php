@@ -9,11 +9,12 @@ use Raza\PHPImpersonate\Platform\PlatformDetector;
  *
  * Resolution order:
  *   1. The PHP_IMPERSONATE_LIB environment variable (explicit path).
- *   2. A library bundled under bin/<platform> (e.g. fetched by
- *      `composer update-binaries -- --libs`).
+ *   2. A library under bin/<platform> — bundled with the package for the
+ *      mainstream platforms (Linux x86_64 glibc, macOS ARM64, Windows x86_64),
+ *      fetched on demand elsewhere by `bin/php-impersonate-install`.
  *
- * The shared library is large (~15-25 MB per platform) and is NOT committed to
- * the package by default, so this returns null unless one has been provisioned.
+ * Returns null when neither yields a readable library (e.g. an on-demand
+ * platform where the installer has not been run).
  */
 final class LibResolver
 {

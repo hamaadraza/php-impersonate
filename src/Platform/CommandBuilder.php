@@ -15,6 +15,9 @@ class CommandBuilder
     /**
      * Build a platform-specific command with proper escaping
      *
+     * @deprecated Use {@see buildCommandArgs()} with proc_open()'s array mode
+     *             instead — it needs no shell escaping and cannot be injected.
+     *             Kept for backward compatibility; no longer used internally.
      * @param string $executable The command executable
      * @param array $arguments Command arguments
      * @param array $options Command options
@@ -43,6 +46,9 @@ class CommandBuilder
     /**
      * Build curl-specific command
      *
+     * @deprecated Use {@see buildCurlCommandArgs()} with proc_open()'s array
+     *             mode instead. Kept for backward compatibility; no longer used
+     *             internally.
      * @param string $executable The curl executable
      * @param array $arguments Command arguments
      * @param array $options Curl options
@@ -132,6 +138,9 @@ class CommandBuilder
     /**
      * Escape a path for the current platform
      *
+     * @deprecated Only useful for shell command strings; with proc_open()'s
+     *             array mode (see {@see buildCommandArgs()}) paths are passed
+     *             verbatim. Kept for backward compatibility.
      * @param string $path The path to escape
      * @return string The escaped path
      */

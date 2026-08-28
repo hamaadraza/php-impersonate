@@ -197,6 +197,10 @@ class PlatformDetector
 
     /**
      * Get the command separator for the current platform
+     *
+     * @deprecated Line-continuation characters only matter for shell command
+     *             strings, which the request path no longer builds. Kept for
+     *             backward compatibility.
      */
     public static function getCommandSeparator(): string
     {

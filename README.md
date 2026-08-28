@@ -26,7 +26,7 @@ echo $response->json()['tls']['ja4']; // a genuine browser fingerprint
 - [**Two engines, one class**](#two-engines-one-class)
 - [Supported platforms](#supported-platforms)
 - [Making requests](#making-requests) · [Responses](#responses) · [Headers](#working-with-headers)
-- [Browsers](#browsers) · [Proxies](#proxies) · [Request bodies](#request-bodies) · [Timeouts](#timeouts) · [Errors](#error-handling)
+- [Browsers](#browsers) · [Curl options](#curl-options) · [Request bodies](#request-bodies) · [Timeouts](#timeouts) · [Errors](#error-handling)
 - [Keeping up to date](#keeping-up-to-date) · [Testing](#testing) · [License](#license)
 
 ---
@@ -89,13 +89,12 @@ one that works in your environment — you never touch a second class.
 | How | calls `libcurl-impersonate` in-process via PHP FFI | runs the bundled `curl-impersonate` binary per request |
 | Performance | no process spawn; **keep-alive connections reused** across requests | one short-lived process per request |
 | Requirements | the `ffi` extension usable + the shared library (bundled on common platforms) | none — works everywhere |
-| Proxies | ✅ | ✅ |
-| Other raw curl options | ❌ proxy options only | ✅ any curl flag |
+| Curl options | ✅ same curated set | ✅ same curated set |
 
 > [!TIP]
 > Just use `PHPImpersonate` — the default `'auto'` engine chooses **FFI** when
-> it's usable and can apply your options, otherwise the **executable**, so your
-> code is identical either way.
+> it's usable, otherwise the **executable**. Both accept the same options and
+> produce the same fingerprints, so your code is identical either way.
 
 ```php
 use Raza\PHPImpersonate\PHPImpersonate;
@@ -156,12 +155,13 @@ PHPImpersonate::ffiAvailable();                 // is the FFI engine usable here
 (new PHPImpersonate('chrome146'))->engine();    // 'ffi' or 'process' — what was chosen
 ```
 
-Under `'auto'`, the FFI engine is used when `PHPImpersonate::ffiAvailable()` is
-true **and** every supplied curl option is one it supports (`proxy`,
-`proxy-user`, `noproxy`); otherwise the executable engine runs. `ffiAvailable()`
-is true only when the `ffi` extension is usable — always on the CLI; other SAPIs
-also need `ffi.enable` — and the shared library loads on this platform (bundled
-for [common platforms](#supported-platforms); `PHP_IMPERSONATE_LIB` overrides it).
+Under `'auto'`, the FFI engine is used whenever `PHPImpersonate::ffiAvailable()`
+is true; otherwise the executable engine runs. Both engines accept the exact same
+[curl options](#curl-options), so the choice never changes behaviour.
+`ffiAvailable()` is true only when the `ffi` extension is usable — always on the
+CLI; other SAPIs also need `ffi.enable` — and the shared library loads on this
+platform (bundled for [common platforms](#supported-platforms);
+`PHP_IMPERSONATE_LIB` overrides it).
 
 > [!NOTE]
 > The FFI engine is **POSIX-only** (Linux and macOS). On Windows the executable
@@ -323,24 +323,38 @@ $client = new PHPImpersonate('safari184');
 $response = $client->sendGet('https://example.com');
 ```
 
-## Proxies
+## Curl options
 
-Configure a proxy through `curlOptions`. Proxy options work on **both engines**,
-so `'auto'` can still use the fast FFI engine for proxied requests:
+Pass extra curl options as the third constructor argument. The **same curated,
+validated set** works on both engines — the shared registry lives in
+`Raza\PHPImpersonate\Support\CurlOptions`:
 
 ```php
 $client = new PHPImpersonate('chrome146', 30, [
     'proxy'      => 'http://127.0.0.1:8080',   // or socks5://127.0.0.1:1080
-    'proxy-user' => 'user:password',           // optional
+    'proxy-user' => 'user:password',
 ]);
 
 $response = $client->sendGet('https://api.ipify.org?format=json');
 ```
 
-| Option | Description | Example |
+| Option | Type | Description |
 |---|---|---|
-| `proxy` | Proxy address (supports `http://`, `socks5://`, …) | `'http://proxy.example.com:3128'` |
-| `proxy-user` | Proxy credentials | `'username:password'` |
+| `proxy` | string | Proxy address (`http://`, `https://`, `socks5://`, …) |
+| `proxy-user` | string | Proxy credentials, `user:password` |
+| `noproxy` | string | Comma-separated hosts that bypass the proxy |
+| `referer` | string | `Referer` header value |
+| `cacert` | string | Path to a custom CA bundle file |
+| `capath` | string | Path to a custom CA directory |
+| `max-redirs` | int | Maximum redirects to follow (default 50) |
+| `insecure` | bool | Skip TLS certificate verification (use with care) |
+
+> [!NOTE]
+> Any option not in this list is rejected with a clear error. Options that would
+> alter the browser fingerprint — `ciphers`, `curves`, `tls-*`, the HTTP version,
+> `user-agent` — are intentionally **not** configurable: overriding them would
+> silently defeat the impersonation. Set a custom `User-Agent` as a request
+> header instead.
 
 ## Request bodies
 

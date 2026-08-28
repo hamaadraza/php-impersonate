@@ -3,6 +3,7 @@
 namespace Raza\PHPImpersonate\Ffi;
 
 use FFI;
+use Raza\PHPImpersonate\Support\CurlOptions;
 use Raza\PHPImpersonate\Platform\PlatformDetector;
 use Raza\PHPImpersonate\Exception\RequestException;
 
@@ -32,9 +33,6 @@ final class CurlImpersonate
     private const CURLOPT_CAINFO = 10065;
     private const CURLOPT_ACCEPT_ENCODING = 10102;
     private const CURLOPT_SSL_SESSIONID_CACHE = 150;
-    private const CURLOPT_PROXY = 10004;
-    private const CURLOPT_PROXYUSERPWD = 10006;
-    private const CURLOPT_NOPROXY = 10177;
     private const CURLINFO_RESPONSE_CODE = 2097154;
 
     private const CURLE_OK = 0;
@@ -42,17 +40,6 @@ final class CurlImpersonate
 
     /** Match the curl command-line tool's default redirect cap (the executable engine). */
     private const MAX_REDIRECTS = 50;
-
-    /**
-     * Curl options this transport understands, mapped to their CURLOPT id.
-     * Keys mirror the executable transport's option names so the same
-     * $curlOptions array works with either. Values are string options.
-     */
-    private const SUPPORTED_OPTIONS = [
-        'proxy' => self::CURLOPT_PROXY,
-        'proxy-user' => self::CURLOPT_PROXYUSERPWD,
-        'noproxy' => self::CURLOPT_NOPROXY,
-    ];
 
     private const HEADER = <<<'CDEF'
         void *curl_easy_init(void);
@@ -119,20 +106,10 @@ final class CurlImpersonate
     }
 
     /**
-     * Curl option names supported by this transport (see SUPPORTED_OPTIONS).
-     *
-     * @return list<string>
-     */
-    public static function supportedOptionKeys(): array
-    {
-        return array_keys(self::SUPPORTED_OPTIONS);
-    }
-
-    /**
      * Perform a request. Inputs are assumed already validated/normalised.
      *
      * @param array<string,string> $headers
-     * @param array<string,mixed> $curlOptions Only keys in SUPPORTED_OPTIONS are applied.
+     * @param array<string,mixed> $curlOptions Applied per {@see CurlOptions} (already validated).
      * @return array{status: int, headers: string, body: string}
      */
     public function request(
@@ -189,7 +166,7 @@ final class CurlImpersonate
             // to the executable engine's (a new process each request never resumes).
             $ffi->curl_easy_setopt($h, self::CURLOPT_SSL_SESSIONID_CACHE, 0);
 
-            $this->applyCaBundle($h);
+            $this->applyCaBundle($h, $curlOptions);
             $this->applyMethod($h, $method, $body);
             $this->applyCurlOptions($h, $curlOptions);
 
@@ -307,8 +284,9 @@ final class CurlImpersonate
     }
 
     /**
-     * Apply the supported subset of $curlOptions to the handle. Unknown keys are
-     * ignored here (PHPImpersonate rejects them up front with a clear message).
+     * Apply the shared, validated custom curl options to the handle, each with
+     * the C type libcurl expects (variadic setopt is not type-checked). Keys are
+     * validated up front by {@see CurlOptions::assertAllowed()}.
      *
      * @param \FFI\CData $h
      * @param array<string,mixed> $curlOptions
@@ -316,17 +294,46 @@ final class CurlImpersonate
     private function applyCurlOptions($h, array $curlOptions): void
     {
         foreach ($curlOptions as $key => $value) {
-            if (isset(self::SUPPORTED_OPTIONS[$key]) && $value !== null && $value !== '') {
-                $this->ffi->curl_easy_setopt($h, self::SUPPORTED_OPTIONS[$key], (string) $value);
+            if (! CurlOptions::isAllowed($key)) {
+                continue;
+            }
+
+            switch (CurlOptions::type($key)) {
+                case CurlOptions::TYPE_STRING:
+                    if ($value !== null && $value !== '') {
+                        $this->ffi->curl_easy_setopt($h, CurlOptions::optId($key), (string) $value);
+                    }
+
+                    break;
+
+                case CurlOptions::TYPE_LONG:
+                    $this->ffi->curl_easy_setopt($h, CurlOptions::optId($key), (int) $value);
+
+                    break;
+
+                case CurlOptions::TYPE_BOOL:
+                    if ($key === 'insecure' && CurlOptions::isEnabled($value)) {
+                        // curl's -k: disable both peer and host verification.
+                        $this->ffi->curl_easy_setopt($h, CurlOptions::CURLOPT_SSL_VERIFYPEER, 0);
+                        $this->ffi->curl_easy_setopt($h, CurlOptions::CURLOPT_SSL_VERIFYHOST, 0);
+                    }
+
+                    break;
             }
         }
     }
 
     /**
      * @param \FFI\CData $h
+     * @param array<string,mixed> $curlOptions
      */
-    private function applyCaBundle($h): void
+    private function applyCaBundle($h, array $curlOptions): void
     {
+        // Let a user-supplied cacert/capath win instead of the default bundle.
+        if (isset($curlOptions['cacert']) || isset($curlOptions['capath'])) {
+            return;
+        }
+
         // POSIX-only engine (see isSupported()), so a CA bundle path is always
         // the right mechanism; BoringSSL does not auto-discover the trust store.
         $ca = \Raza\PHPImpersonate\Support\CaBundle::path();

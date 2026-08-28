@@ -38,34 +38,49 @@ class EngineSelectionTest extends TestCase
         new PHPImpersonate('chrome136', 30, [], 'bogus');
     }
 
-    public function testAutoUsesProcessForFfiUnsupportedOptions(): void
+    public function testAutoUsesFfiWhenAvailableRegardlessOfOptions(): void
     {
-        // 'insecure' is a valid executable option the FFI engine can't map,
-        // so auto must stay on the process engine.
-        $client = new PHPImpersonate('chrome136', 30, ['insecure' => true]);
-        $this->assertSame(PHPImpersonate::ENGINE_PROCESS, $client->engine());
-    }
-
-    public function testAutoUsesFfiForProxyWhenAvailable(): void
-    {
-        // Proxy options ARE supported by the FFI engine.
+        // Every supported option works on both engines, so auto just prefers FFI.
         $expected = PHPImpersonate::ffiAvailable()
             ? PHPImpersonate::ENGINE_FFI
             : PHPImpersonate::ENGINE_PROCESS;
 
-        $client = new PHPImpersonate('chrome136', 30, ['proxy' => 'http://127.0.0.1:8080']);
-        $this->assertSame($expected, $client->engine());
+        foreach ([[], ['proxy' => 'http://127.0.0.1:8080'], ['insecure' => true]] as $options) {
+            $client = new PHPImpersonate('chrome136', 30, $options);
+            $this->assertSame($expected, $client->engine());
+        }
     }
 
-    public function testForcedFfiRejectsUnsupportedOption(): void
+    /**
+     * @return array<string, array{0: array<string,mixed>}>
+     */
+    public static function unsupportedOptionProvider(): array
     {
-        if (! PHPImpersonate::ffiAvailable()) {
-            $this->markTestSkipped('FFI engine not available.');
-        }
+        return [
+            'fingerprint (ciphers)' => [['ciphers' => 'x']],
+            'fingerprint (user-agent)' => [['user-agent' => 'x']],
+            'internal (output)' => [['output' => '/tmp/x']],
+        ];
+    }
 
-        $this->expectException(InvalidArgumentException::class);
-        $this->expectExceptionMessage('does not support');
-        new PHPImpersonate('chrome136', 30, ['insecure' => true], PHPImpersonate::ENGINE_FFI);
+    /**
+     * @param array<string,mixed> $options
+     */
+    #[\PHPUnit\Framework\Attributes\DataProvider('unsupportedOptionProvider')]
+    public function testUnsupportedOptionIsRejectedOnBothEngines(array $options): void
+    {
+        foreach ([PHPImpersonate::ENGINE_FFI, PHPImpersonate::ENGINE_PROCESS] as $engine) {
+            if ($engine === PHPImpersonate::ENGINE_FFI && ! PHPImpersonate::ffiAvailable()) {
+                continue;
+            }
+
+            try {
+                new PHPImpersonate('chrome136', 30, $options, $engine);
+                $this->fail("$engine accepted an unsupported option");
+            } catch (InvalidArgumentException $e) {
+                $this->assertStringContainsString('Unsupported curl option', $e->getMessage());
+            }
+        }
     }
 
     public function testForcedFfiThrowsWhenUnavailable(): void

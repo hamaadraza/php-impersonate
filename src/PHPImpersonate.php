@@ -8,6 +8,7 @@ use Raza\PHPImpersonate\Browser\Browser;
 use Raza\PHPImpersonate\Ffi\LibResolver;
 use Raza\PHPImpersonate\Ffi\CurlImpersonate;
 use Raza\PHPImpersonate\Process\CurlProcess;
+use Raza\PHPImpersonate\Support\CurlOptions;
 use Raza\PHPImpersonate\Browser\BrowserConfig;
 use Raza\PHPImpersonate\Support\RequestPreparer;
 use Raza\PHPImpersonate\Browser\BrowserInterface;
@@ -33,7 +34,7 @@ class PHPImpersonate implements ClientInterface
 
     /**
      * Engine selection. 'auto' uses the fast in-process FFI engine when it is
-     * usable and can apply the given options, otherwise the executable engine.
+     * usable, otherwise the executable engine. Both accept the same options.
      */
     public const ENGINE_AUTO = 'auto';
     public const ENGINE_FFI = 'ffi';
@@ -84,14 +85,9 @@ class PHPImpersonate implements ClientInterface
     ) {
         $this->validateTimeout($timeout);
         $this->validatePlatform();
-        $this->engine = $this->resolveEngine($engine, $curlOptions);
+        CurlOptions::assertAllowed($curlOptions);
+        $this->engine = $this->resolveEngine($engine);
         $this->initializeBrowser($browser);
-
-        if ($this->engine === self::ENGINE_FFI) {
-            $this->assertFfiOptionsSupported($curlOptions);
-        } else {
-            CurlProcess::validateCurlOptions($curlOptions);
-        }
     }
 
     /**
@@ -450,12 +446,12 @@ class PHPImpersonate implements ClientInterface
     }
 
     /**
-     * Resolve the effective engine from the requested one and the given options.
+     * Resolve the effective engine. Every supported curl option works on both
+     * engines (see {@see CurlOptions}), so 'auto' simply prefers FFI when usable.
      *
-     * @param array<string,mixed> $curlOptions
      * @return self::ENGINE_FFI|self::ENGINE_PROCESS
      */
-    private function resolveEngine(string $requested, array $curlOptions): string
+    private function resolveEngine(string $requested): string
     {
         switch ($requested) {
             case self::ENGINE_PROCESS:
@@ -472,41 +468,12 @@ class PHPImpersonate implements ClientInterface
                 return self::ENGINE_FFI;
 
             case self::ENGINE_AUTO:
-                return (self::ffiAvailable() && $this->ffiCanHandle($curlOptions))
-                    ? self::ENGINE_FFI
-                    : self::ENGINE_PROCESS;
+                return self::ffiAvailable() ? self::ENGINE_FFI : self::ENGINE_PROCESS;
 
             default:
                 throw new InvalidArgumentException(
                     "Unknown engine '$requested'. Use 'auto', 'ffi', or 'process'."
                 );
-        }
-    }
-
-    /**
-     * Whether the FFI engine can apply every supplied curl option.
-     *
-     * @param array<string,mixed> $curlOptions
-     */
-    private function ffiCanHandle(array $curlOptions): bool
-    {
-        return array_diff(array_keys($curlOptions), CurlImpersonate::supportedOptionKeys()) === [];
-    }
-
-    /**
-     * @param array<string,mixed> $curlOptions
-     * @throws InvalidArgumentException on any option the FFI engine cannot apply.
-     */
-    private function assertFfiOptionsSupported(array $curlOptions): void
-    {
-        $unsupported = array_diff(array_keys($curlOptions), CurlImpersonate::supportedOptionKeys());
-        if ($unsupported !== []) {
-            throw new InvalidArgumentException(sprintf(
-                'The FFI engine does not support the curl option(s): %s. Supported: %s. '
-                . "Use the process engine (engine: PHPImpersonate::ENGINE_PROCESS) for other options.",
-                implode(', ', $unsupported),
-                implode(', ', CurlImpersonate::supportedOptionKeys())
-            ));
         }
     }
 }

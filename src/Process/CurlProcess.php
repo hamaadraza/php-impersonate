@@ -2,7 +2,6 @@
 
 namespace Raza\PHPImpersonate\Process;
 
-use InvalidArgumentException;
 use Raza\PHPImpersonate\Support\CaBundle;
 use Raza\PHPImpersonate\Platform\CommandBuilder;
 use Raza\PHPImpersonate\Support\RequestPreparer;
@@ -97,38 +96,6 @@ final class CurlProcess
                 foreach ($additionalTempFiles as $tempFile) {
                     $this->deleteTempFile($tempFile);
                 }
-            }
-        }
-    }
-
-    /**
-     * Reject curl options that would conflict with how responses are captured or
-     * that could write/read arbitrary files. Static so it can validate at client
-     * construction, before an engine exists.
-     *
-     * @param array<string,mixed> $curlOptions
-     * @throws InvalidArgumentException
-     */
-    public static function validateCurlOptions(array $curlOptions): void
-    {
-        $forbiddenOptions = [
-            // Conflict with how responses are captured internally
-            'o', 'output', 'D', 'dump-header', 'w', 'write-out',
-            // Write files to paths chosen by the server or outside our control
-            'O', 'remote-name', 'remote-name-all', 'J', 'remote-header-name', 'output-dir',
-            // Load arbitrary curl config, which can re-introduce any of the above
-            'K', 'config',
-            // Redirect diagnostics to files
-            'trace', 'trace-ascii', 'stderr',
-            // Start a second request with a fresh option set, bypassing all checks
-            ':', 'next',
-        ];
-
-        foreach ($forbiddenOptions as $option) {
-            if (isset($curlOptions[$option])) {
-                throw new InvalidArgumentException(
-                    "Curl option '$option' is not allowed as it conflicts with internal usage"
-                );
             }
         }
     }

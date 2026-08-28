@@ -53,6 +53,27 @@ class EngineParityTest extends TestCase
         );
     }
 
+    public function testCustomOptionsBehaveIdenticallyOnBothEngines(): void
+    {
+        TestServer::requireHttpbin($this);
+
+        // referer is sent verbatim, and max-redirs caps the redirect chain — the
+        // same way on both engines (the shared, typed option map).
+        $referer = fn (string $engine): string => (new PHPImpersonate('chrome146', 30, ['referer' => 'https://ref.test/x'], $engine))
+            ->sendGet(TestServer::httpbin('/headers'))->json()['headers']['Referer'] ?? '';
+
+        $this->assertSame('https://ref.test/x', $referer(PHPImpersonate::ENGINE_FFI));
+        $this->assertSame('https://ref.test/x', $referer(PHPImpersonate::ENGINE_PROCESS));
+
+        $capped = fn (string $engine): int => (new PHPImpersonate('chrome146', 15, ['max-redirs' => 1], $engine))
+            ->sendGet(TestServer::httpbin('/redirect/3'))->status();
+
+        $ffi = $capped(PHPImpersonate::ENGINE_FFI);
+        $this->assertGreaterThanOrEqual(300, $ffi);
+        $this->assertLessThan(400, $ffi);
+        $this->assertSame($ffi, $capped(PHPImpersonate::ENGINE_PROCESS));
+    }
+
     public function testGetWithBodyKeepsMethodOnBothEngines(): void
     {
         TestServer::requireHttpbin($this);

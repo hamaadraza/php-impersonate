@@ -15,12 +15,18 @@ use PHPUnit\Framework\TestCase;
  * The TLS-fingerprint tests need a service that reports the negotiated JA3/JA4,
  * which httpbin cannot do; they use https://tls.peet.ws (override with
  * TLS_FINGERPRINT_URL). Both `require*` helpers probe once per process and skip
- * the test when the service is unreachable, so an outage never fails CI.
+ * the test when the service is unreachable OR answers a non-2xx status — a
+ * rate-limited service is not a healthy one — so an outage never fails CI.
  */
 final class TestServer
 {
-    /** @var array<string, bool> cached reachability probes, keyed by URL */
-    private static array $reachable = [];
+    /**
+     * Cached probes, keyed by URL: the HTTP status the service answered with,
+     * or null when the connection could not be made at all.
+     *
+     * @var array<string, int|null>
+     */
+    private static array $probed = [];
 
     public static function httpbin(string $path = ''): string
     {
@@ -52,11 +58,13 @@ final class TestServer
 
     private static function require(TestCase $test, string $url, string $name, string $envVar): void
     {
-        if (! array_key_exists($url, self::$reachable)) {
-            self::$reachable[$url] = self::probe($url);
+        if (! array_key_exists($url, self::$probed)) {
+            self::$probed[$url] = self::probe($url);
         }
 
-        if (! self::$reachable[$url]) {
+        $status = self::$probed[$url];
+
+        if ($status === null) {
             $test->markTestSkipped(sprintf(
                 '%s is unreachable at %s. Start a local instance (see docker-compose.yml) '
                 . 'and set %s, or check your network.',
@@ -65,10 +73,55 @@ final class TestServer
                 $envVar
             ));
         }
+
+        // A reachable service is not automatically a usable one. The probe sets
+        // ignore_errors, so a 429 or a 503 comes back as an ordinary body and
+        // used to read as healthy — after which every test that trusted the
+        // probe failed on a rate-limit page instead of skipping. Now that the
+        // fingerprint suites assert hard rather than swallowing exceptions, that
+        // turned one 429 into a screenful of unrelated failures.
+        if ($status < 200 || $status >= 300) {
+            $test->markTestSkipped(sprintf(
+                '%s answered HTTP %d at %s, so it cannot serve this test.%s Run a local '
+                . 'instance (see docker-compose.yml) and set %s to stop depending on it.',
+                ucfirst($name),
+                $status,
+                $url,
+                $status === 429 ? ' That is a rate limit, not a fault in this library.' : '',
+                $envVar
+            ));
+        }
     }
 
-    private static function probe(string $url): bool
+    /**
+     * The status code of the final response in a `$http_response_header` array.
+     *
+     * The last status line wins: the stream wrapper follows redirects by default,
+     * so the array can hold one line per hop.
+     *
+     * @param array<int, string> $responseHeaders
+     */
+    public static function statusFromHeaders(array $responseHeaders): ?int
     {
+        $status = null;
+
+        foreach ($responseHeaders as $line) {
+            if (preg_match('#^HTTP/[\d.]+\s+(\d{3})#', $line, $m)) {
+                $status = (int) $m[1];
+            }
+        }
+
+        return $status;
+    }
+
+    /**
+     * @return int|null The HTTP status answered, or null if nothing answered.
+     */
+    private static function probe(string $url): ?int
+    {
+        // ignore_errors keeps the response (and its status line) instead of
+        // collapsing a 4xx/5xx into `false`, which is what lets the caller tell
+        // "rate limited" apart from "down".
         $context = stream_context_create([
             'http' => ['method' => 'GET', 'timeout' => 8, 'ignore_errors' => true],
             'ssl' => ['verify_peer' => false, 'verify_peer_name' => false],
@@ -83,9 +136,16 @@ final class TestServer
         set_error_handler(static fn (): bool => true);
 
         try {
-            return file_get_contents($url, false, $context) !== false;
+            // $http_response_header is populated in this scope by the call.
+            $body = file_get_contents($url, false, $context);
         } finally {
             restore_error_handler();
         }
+
+        if ($body === false) {
+            return null;
+        }
+
+        return self::statusFromHeaders($http_response_header ?? []);
     }
 }

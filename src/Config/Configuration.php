@@ -27,6 +27,8 @@ class Configuration
 
     /**
      * Get configuration for the current platform
+     *
+     * @return array<string,mixed>
      */
     public static function getPlatformConfig(): array
     {
@@ -47,6 +49,8 @@ class Configuration
 
     /**
      * Get fallback binary directories for the current platform
+     *
+     * @return list<string>
      */
     public static function getBinaryDirFallbacks(): array
     {
@@ -58,6 +62,8 @@ class Configuration
 
     /**
      * Set configuration for a platform
+     *
+     * @param array<string,mixed> $config
      */
     public static function setPlatformConfig(string $platform, array $config): void
     {

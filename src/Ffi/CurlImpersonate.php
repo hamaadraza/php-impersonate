@@ -28,6 +28,7 @@ final class CurlImpersonate
     private const CURLOPT_CONNECTTIMEOUT_MS = 156;
     private const CURLOPT_CUSTOMREQUEST = 10036;
     private const CURLOPT_NOBODY = 44;
+    private const CURLOPT_POST = 47;
     private const CURLOPT_POSTFIELDSIZE_LARGE = 30120; // CURLOPTTYPE_OFF_T (30000) + 120
     private const CURLOPT_COPYPOSTFIELDS = 10165;
     private const CURLOPT_HTTPHEADER = 10023;
@@ -288,10 +289,22 @@ final class CurlImpersonate
             $this->ffi->curl_easy_setopt($h, self::CURLOPT_COPYPOSTFIELDS, $body);
         }
 
+        if ($method === 'POST') {
+            // Let libcurl own the verb for POST instead of pinning it with
+            // CUSTOMREQUEST. A pinned verb survives a redirect, and on a
+            // 301/302/303 libcurl does what browsers do — switch to GET and drop
+            // the body — while the pinned string keeps saying POST. The result
+            // was the worst of both: a POST carrying no body at all.
+            // CURLOPT_POST also covers the bodyless case, which COPYPOSTFIELDS
+            // above does not reach.
+            $this->ffi->curl_easy_setopt($h, self::CURLOPT_POST, 1);
+
+            return;
+        }
+
         // Pin the method verb explicitly whenever it isn't a plain bodyless GET.
         // In particular a body must not silently promote GET (or DELETE) to POST,
-        // which COPYPOSTFIELDS does on its own — matching the executable engine,
-        // which always passes -X <method>.
+        // which COPYPOSTFIELDS does on its own — matching the executable engine.
         if ($method !== 'GET' || $body !== null) {
             $this->ffi->curl_easy_setopt($h, self::CURLOPT_CUSTOMREQUEST, $method);
         }

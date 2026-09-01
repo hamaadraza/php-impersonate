@@ -18,6 +18,8 @@ class Browser implements BrowserInterface
     private static array $verifiedBinaries = [];
 
     private string $executablePath;
+
+    /** @var array<string,mixed> */
     private array $config;
 
     /**
@@ -123,6 +125,8 @@ class Browser implements BrowserInterface
 
     /**
      * Get all possible paths to check for the binary
+     *
+     * @return array<int,string>
      */
     private function getAllPossiblePaths(string $binaryFile): array
     {
@@ -164,6 +168,8 @@ class Browser implements BrowserInterface
 
     /**
      * Get system paths for different platforms
+     *
+     * @return list<string>
      */
     private function getSystemPaths(string $platform, string $binaryFile): array
     {

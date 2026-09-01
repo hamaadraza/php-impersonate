@@ -320,6 +320,81 @@ class RequestPreparerTest extends TestCase
     }
 
     /**
+     * URLs curl and every browser accept, which filter_var(FILTER_VALIDATE_URL)
+     * refused — so the library rejected them before a request was ever made.
+     *
+     * Verified against the bundled binary rather than assumed: it reports IDN
+     * support (libidn2) and fetches `https://münchen.de/` successfully, and
+     * unicode paths and queries round-trip through both engines.
+     *
+     * @param string $url
+     */
+    #[DataProvider('acceptableUrlProvider')]
+    public function testValidateRequestAcceptsWhatCurlAccepts(string $url): void
+    {
+        RequestPreparer::validateRequest(Request::get($url));
+        $this->addToAssertionCount(1);
+    }
+
+    /**
+     * @return array<string, array{0: string}>
+     */
+    public static function acceptableUrlProvider(): array
+    {
+        return [
+            'IDN host' => ['https://münchen.de/'],
+            'IDN host, non-latin' => ['https://例え.jp/'],
+            'punycode host' => ['https://xn--mnchen-3ya.de/'],
+            // Legal in DNS and common on internal networks (service discovery).
+            'underscore in host' => ['https://my_host.example.com/'],
+            'unicode path' => ['https://example.com/café'],
+            'unicode query' => ['https://example.com/a?q=hé'],
+            'userinfo' => ['https://user:pass@example.com/'],
+            'IPv4 literal' => ['https://192.168.1.1/'],
+            'IPv6 literal' => ['https://[::1]:8080/'],
+            'port and path' => ['http://localhost:8080/path'],
+            'no trailing slash' => ['http://example.com'],
+        ];
+    }
+
+    /**
+     * Loosening the format check must not loosen the guards that matter: the
+     * scheme allow-list (an HTTP client handing file:// or ftp:// to curl is an
+     * SSRF surprise) and control characters, where a CR or LF in the request
+     * target could split it into a second request.
+     *
+     * @param string $url
+     * @param string $expectedMessage
+     */
+    #[DataProvider('rejectableUrlProvider')]
+    public function testValidateRequestStillRejectsWhatItMust(string $url, string $expectedMessage): void
+    {
+        $this->expectException(InvalidArgumentException::class);
+        $this->expectExceptionMessage($expectedMessage);
+
+        RequestPreparer::validateRequest(Request::get($url));
+    }
+
+    /**
+     * @return array<string, array{0: string, 1: string}>
+     */
+    public static function rejectableUrlProvider(): array
+    {
+        return [
+            'ftp' => ['ftp://example.com/x', 'Unsupported URL scheme'],
+            // Parses to no host at all, so it must still name the scheme it
+            // was rejected for rather than blaming the host.
+            'file' => ['file:///etc/passwd', 'Unsupported URL scheme'],
+            'javascript' => ['javascript:alert(1)', 'Unsupported URL scheme'],
+            'CRLF injection' => ["https://exa\r\nmple.com/", 'must be percent-encoded'],
+            'raw space' => ['https://example.com/a b', 'must be percent-encoded'],
+            'tab' => ["https://example.com/\tx", 'must be percent-encoded'],
+            'no host' => ['https://', 'a scheme and a host are required'],
+            'protocol-relative' => ['//example.com/path', 'a scheme and a host are required'],
+        ];
+    }
+
+    /**
      * @return array<string, array{0: string, 1: string}>
      */
     public static function unsafeHeaderProvider(): array

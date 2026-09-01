@@ -187,6 +187,62 @@ class EngineParityTest extends TestCase
         );
     }
 
+    /**
+     * A redirected POST must behave the way curl and browsers do, on both engines.
+     *
+     * 301/302/303 switch to GET and drop the body; 307/308 preserve both. The
+     * engines used to pin the verb — `-X POST` and CURLOPT_CUSTOMREQUEST — which
+     * survives the redirect, while libcurl still applied its own rule and dropped
+     * the body. The result was neither behaviour: a POST carrying nothing.
+     *
+     * @param int $status
+     * @param string $expectedMethod
+     * @param bool $expectBody
+     */
+    #[DataProvider('redirectProvider')]
+    public function testRedirectedPostFollowsBrowserSemanticsOnBothEngines(
+        int $status,
+        string $expectedMethod,
+        bool $expectBody
+    ): void {
+        TestServer::requireHttpbin($this);
+
+        foreach ([PHPImpersonate::ENGINE_FFI, PHPImpersonate::ENGINE_PROCESS] as $engine) {
+            $body = (new PHPImpersonate('chrome146', 30, [], $engine))->sendPost(
+                TestServer::httpbin('/redirect-to?url=%2Fanything&status_code=' . $status),
+                ['a' => '1']
+            )->json();
+
+            $this->assertSame(
+                $expectedMethod,
+                $body['method'] ?? null,
+                "$engine used the wrong method after a $status"
+            );
+
+            $this->assertSame(
+                $expectBody ? ['a' => '1'] : [],
+                $body['form'] ?? [],
+                $expectBody
+                    ? "$engine dropped the body a $status must preserve"
+                    : "$engine resent a body a $status must drop"
+            );
+        }
+    }
+
+    /**
+     * @return array<string, array{0: int, 1: string, 2: bool}>
+     */
+    public static function redirectProvider(): array
+    {
+        return [
+            '301 becomes GET' => [301, 'GET', false],
+            '302 becomes GET' => [302, 'GET', false],
+            '303 becomes GET' => [303, 'GET', false],
+            '307 keeps POST' => [307, 'POST', true],
+            '308 keeps POST' => [308, 'POST', true],
+        ];
+    }
+
     public function testGetWithBodyKeepsMethodOnBothEngines(): void
     {
         TestServer::requireHttpbin($this);

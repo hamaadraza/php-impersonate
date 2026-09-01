@@ -78,9 +78,13 @@ class PlatformDetector
             return self::LIBC_MUSL;
         }
 
-        // Method 2: Check ldd --version output
+        // Method 2: Check ldd --version output.
+        // shell_exec() returns string|false|null — false when the process could
+        // not be spawned at all. The null check alone let `false` through to
+        // stripos(), where it silently coerced to '' and every probe below
+        // quietly missed.
         $lddOutput = @shell_exec('ldd --version 2>&1');
-        if ($lddOutput !== null) {
+        if (is_string($lddOutput)) {
             if (stripos($lddOutput, 'musl') !== false) {
                 return self::LIBC_MUSL;
             }
@@ -172,6 +176,8 @@ class PlatformDetector
     /**
      * Get fallback binary directories to check (for backwards compatibility)
      * Returns an array of directory suffixes to try, in order of preference
+     *
+     * @return list<string>
      */
     public static function getBinaryDirFallbacks(): array
     {
@@ -208,6 +214,8 @@ class PlatformDetector
 
     /**
      * Get supported architectures
+     *
+     * @return list<string>
      */
     public static function getSupportedArchitectures(): array
     {

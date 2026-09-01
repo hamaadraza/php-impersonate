@@ -6,6 +6,8 @@ class BrowserConfig
 {
     /**
      * Get all available browser configurations
+     *
+     * @return array<string, array<string,mixed>>
      */
     public static function getAllConfigs(): array
     {
@@ -1230,6 +1232,8 @@ class BrowserConfig
 
     /**
      * Get configuration for a specific browser
+     *
+     * @return array<string,mixed>
      */
     public static function getConfig(string $browserName): array
     {
@@ -1244,6 +1248,8 @@ class BrowserConfig
 
     /**
      * Get list of all available browser names
+     *
+     * @return list<string>
      */
     public static function getAvailableBrowsers(): array
     {

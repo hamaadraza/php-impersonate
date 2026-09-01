@@ -29,7 +29,7 @@ class Response
      * Parse the response body as JSON.
      *
      * @param bool $associative When true, returns array instead of object
-     * @param int $depth Maximum nesting depth
+     * @param int<1, max> $depth Maximum nesting depth; json_decode() rejects anything below 1
      * @param int $flags JSON decode flags
      * @return mixed
      * @throws \JsonException If JSON decoding fails

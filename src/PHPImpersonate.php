@@ -225,7 +225,9 @@ class PHPImpersonate implements ClientInterface
 
     // Static convenience methods
     /**
+     * @param array<string,string> $headers Headers to send with the request
      * @param BrowserName $browser Browser name (see BrowserName constants or constructor docblock)
+     * @param array<string,mixed> $curlOptions Custom curl options (e.g. 'proxy')
      * @param self::ENGINE_* $engine Engine to use; 'auto' (default) picks FFI when usable.
      */
     public static function get(
@@ -240,7 +242,10 @@ class PHPImpersonate implements ClientInterface
     }
 
     /**
+     * @param array<string,mixed>|null $data Data to send as the request body
+     * @param array<string,string> $headers Headers to send with the request
      * @param BrowserName $browser Browser name (see BrowserName constants or constructor docblock)
+     * @param array<string,mixed> $curlOptions Custom curl options (e.g. 'proxy')
      * @param self::ENGINE_* $engine Engine to use; 'auto' (default) picks FFI when usable.
      */
     public static function post(
@@ -256,7 +261,9 @@ class PHPImpersonate implements ClientInterface
     }
 
     /**
+     * @param array<string,string> $headers Headers to send with the request
      * @param BrowserName $browser Browser name (see BrowserName constants or constructor docblock)
+     * @param array<string,mixed> $curlOptions Custom curl options (e.g. 'proxy')
      * @param self::ENGINE_* $engine Engine to use; 'auto' (default) picks FFI when usable.
      */
     public static function head(
@@ -271,7 +278,9 @@ class PHPImpersonate implements ClientInterface
     }
 
     /**
+     * @param array<string,string> $headers Headers to send with the request
      * @param BrowserName $browser Browser name (see BrowserName constants or constructor docblock)
+     * @param array<string,mixed> $curlOptions Custom curl options (e.g. 'proxy')
      * @param self::ENGINE_* $engine Engine to use; 'auto' (default) picks FFI when usable.
      */
     public static function delete(
@@ -286,7 +295,10 @@ class PHPImpersonate implements ClientInterface
     }
 
     /**
+     * @param array<string,mixed>|null $data Data to send as the request body
+     * @param array<string,string> $headers Headers to send with the request
      * @param BrowserName $browser Browser name (see BrowserName constants or constructor docblock)
+     * @param array<string,mixed> $curlOptions Custom curl options (e.g. 'proxy')
      * @param self::ENGINE_* $engine Engine to use; 'auto' (default) picks FFI when usable.
      */
     public static function patch(
@@ -302,7 +314,10 @@ class PHPImpersonate implements ClientInterface
     }
 
     /**
+     * @param array<string,mixed>|null $data Data to send as the request body
+     * @param array<string,string> $headers Headers to send with the request
      * @param BrowserName $browser Browser name (see BrowserName constants or constructor docblock)
+     * @param array<string,mixed> $curlOptions Custom curl options (e.g. 'proxy')
      * @param self::ENGINE_* $engine Engine to use; 'auto' (default) picks FFI when usable.
      */
     public static function put(

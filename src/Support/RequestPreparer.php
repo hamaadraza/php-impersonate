@@ -18,23 +18,57 @@ final class RequestPreparer
     /**
      * Validate the request URL: non-empty, well-formed, http/https only.
      *
+     * Deliberately NOT filter_var(FILTER_VALIDATE_URL). That filter predates
+     * internationalised domains and rejects a good deal of what curl and every
+     * browser accept — measured against the bundled binary: an IDN host
+     * (`https://münchen.de/` fetches fine, the library refused it), an
+     * underscore in a hostname (legal in DNS and common on internal networks),
+     * and any non-ASCII character in a path or query. It is also no help for the
+     * part that matters, happily passing `ftp://` and `file://`.
+     *
+     * So the checks here are the ones that earn their place: no control
+     * characters, a parseable scheme and host, and an http/https allow-list.
+     * Anything else is curl's business — a host that does not resolve is a
+     * RequestException naming the real problem, which beats "Invalid URL format"
+     * for a URL that was never invalid.
+     *
      * @throws InvalidArgumentException
      */
     public static function validateRequest(Request $request): void
     {
-        if (empty(trim($request->getUrl()))) {
+        $url = $request->getUrl();
+
+        if (trim($url) === '') {
             throw new InvalidArgumentException('URL cannot be empty');
         }
 
-        if (! filter_var($request->getUrl(), FILTER_VALIDATE_URL)) {
-            throw new InvalidArgumentException('Invalid URL format');
+        // No ASCII control characters or spaces, anywhere. This string becomes
+        // the request target, where a CR or an LF could split it into a second
+        // request; a raw space would truncate the request line. Callers with such
+        // characters in a path or query must percent-encode them, as a browser
+        // would. (\x20 is space, \x7F is DEL.)
+        if (preg_match('/[\x00-\x20\x7F]/', $url)) {
+            throw new InvalidArgumentException(
+                'Invalid URL: spaces and control characters must be percent-encoded'
+            );
         }
 
-        // FILTER_VALIDATE_URL accepts ftp://, file://localhost/..., etc.; this is
-        // an HTTP client, and passing other schemes to curl invites SSRF surprises
-        $scheme = strtolower((string) parse_url($request->getUrl(), PHP_URL_SCHEME));
+        $parts = parse_url($url);
+
+        if ($parts === false || ! isset($parts['scheme'])) {
+            throw new InvalidArgumentException('Invalid URL format: a scheme and a host are required');
+        }
+
+        // Checked before the host so that ftp:// and file:// — which parse to no
+        // host at all — report the scheme they were rejected for. This is an HTTP
+        // client, and handing other schemes to curl invites SSRF surprises.
+        $scheme = strtolower($parts['scheme']);
         if (! in_array($scheme, ['http', 'https'], true)) {
             throw new InvalidArgumentException("Unsupported URL scheme \"$scheme\": only http and https are allowed");
+        }
+
+        if (! isset($parts['host']) || $parts['host'] === '') {
+            throw new InvalidArgumentException('Invalid URL format: a scheme and a host are required');
         }
     }
 

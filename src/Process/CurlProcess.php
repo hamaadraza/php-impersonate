@@ -294,6 +294,11 @@ final class CurlProcess
         try {
             if ($body !== null) {
                 $tempFiles = array_merge($tempFiles, $this->addBodyToOptions($options, $body));
+            } elseif (strtoupper($method) === 'POST') {
+                // A bodyless POST still has to reach curl as a POST, and with -X
+                // withheld (see buildCurlOptions()) an empty --data-binary is what
+                // says so without pinning the verb across redirects.
+                $options['data-binary'] = '';
             }
 
             // Every header goes through a 0600 temp file rather than argv. While
@@ -496,7 +501,12 @@ final class CurlProcess
             // -X HEAD makes curl wait for a body the server never sends and can
             // hang until max-time on keep-alive connections; --head is correct.
             $options['head'] = true;
-        } else {
+        } elseif ($method !== 'POST') {
+            // POST is deliberately absent: --data-binary already makes the request
+            // a POST, and -X would additionally pin the verb across redirects. On
+            // a 301/302/303 curl does what browsers do — switch to GET and drop
+            // the body — while the pinned verb keeps saying POST, so the redirect
+            // was followed with a POST carrying no body. See addBodyToOptions().
             $options['X'] = $method;
         }
 

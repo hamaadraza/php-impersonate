@@ -226,6 +226,61 @@ class ProcessCommandTest extends TestCase
      * Folded in RequestPreparer::normalizeHeaders(), which both engines pass
      * through, so this covers the executable engine's end of that contract.
      */
+    /**
+     * `-X POST` must not reach argv.
+     *
+     * -X pins the verb for every request on the handle, redirect follow-ups
+     * included. On a 301/302/303 curl does what browsers do — switch to GET and
+     * drop the body — but the pinned verb still says POST, so the redirect was
+     * followed with a POST carrying no body at all. `--data-binary` already
+     * makes the request a POST without pinning anything.
+     */
+    public function testPostDoesNotPinTheVerbWithDashX(): void
+    {
+        $argv = $this->argv(['User-Agent' => 'A/1'], [], [], 'POST');
+
+        $this->assertNotContains('-X', $argv, '-X pins the verb across redirects');
+
+        // Still unambiguously a POST: a bodyless POST says so with empty data.
+        $this->assertContains('--data-binary', $argv);
+    }
+
+    /**
+     * The other verbs keep -X: libcurl only rewrites POST on a redirect, so
+     * there is nothing for a pinned PUT or DELETE to contradict.
+     *
+     * @param string $method
+     */
+    #[DataProvider('pinnedVerbProvider')]
+    public function testOtherMethodsStillPinTheVerb(string $method): void
+    {
+        $argv = $this->argv(['User-Agent' => 'A/1'], [], [], $method);
+
+        $this->assertContains('-X', $argv);
+        $this->assertContains($method, $argv);
+    }
+
+    /**
+     * @return array<string, array{0: string}>
+     */
+    public static function pinnedVerbProvider(): array
+    {
+        return [
+            'PUT' => ['PUT'],
+            'PATCH' => ['PATCH'],
+            'DELETE' => ['DELETE'],
+        ];
+    }
+
+    public function testHeadUsesHeadFlagNotDashX(): void
+    {
+        $argv = $this->argv(['User-Agent' => 'A/1'], [], [], 'HEAD');
+
+        // -X HEAD makes curl wait for a body the server never sends.
+        $this->assertContains('--head', $argv);
+        $this->assertNotContains('-X', $argv);
+    }
+
     public function testCaseVariantCallerHeadersCollapseToOne(): void
     {
         $headers = $this->sentHeaders(

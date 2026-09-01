@@ -6,6 +6,10 @@ use Exception;
 
 class PlatformNotSupportedException extends Exception
 {
+    /**
+     * @param list<string> $supportedPlatforms
+     * @param list<string>|null $supportedArchitectures
+     */
     public function __construct(
         string $platform,
         array $supportedPlatforms = [],

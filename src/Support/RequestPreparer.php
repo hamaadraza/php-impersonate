@@ -115,6 +115,14 @@ final class RequestPreparer
      * show for it — and it sat oddly beside {@see assertHeaderIsSafe()}, which
      * throws. Both now fail loudly.
      *
+     * Names that differ only in case are ONE header (RFC 9110 §5.1), so they are
+     * folded together here — the one place both engines pass through, which is
+     * why neither has to know about it. Left unfolded,
+     * `['User-Agent' => …, 'user-agent' => …]` reached the wire as two
+     * User-Agent lines on both engines: a bot signal in its own right, and the
+     * same duplication that was already fixed for a caller header colliding with
+     * the browser profile's.
+     *
      * @param array<int|string,mixed> $headers
      * @return array<string,string>
      * @throws InvalidArgumentException
@@ -122,6 +130,8 @@ final class RequestPreparer
     public static function normalizeHeaders(array $headers): array
     {
         $normalized = [];
+        /** @var array<string,string> $names lower-cased name => the spelling already in use */
+        $names = [];
 
         foreach ($headers as $key => $value) {
             if (is_int($key)) {
@@ -135,29 +145,35 @@ final class RequestPreparer
                 }
 
                 $colonPos = strpos($value, ':');
-                $headerName = $colonPos === false ? '' : trim(substr($value, 0, $colonPos));
+                $name = $colonPos === false ? '' : trim(substr($value, 0, $colonPos));
 
-                if ($headerName === '') {
+                if ($name === '') {
                     throw new InvalidArgumentException(sprintf(
                         'Invalid header "%s": list-form entries must be "Name: Value" with a non-empty name',
                         $value
                     ));
                 }
 
-                $normalized[$headerName] = trim(substr($value, $colonPos + 1));
+                $value = trim(substr($value, $colonPos + 1));
+            } else {
+                if (! is_string($value) && ! is_numeric($value)) {
+                    throw new InvalidArgumentException(sprintf(
+                        'Invalid value for header "%s": expected a string or number, %s given',
+                        $key,
+                        get_debug_type($value)
+                    ));
+                }
 
-                continue;
+                $name = $key;
+                $value = (string) $value;
             }
 
-            if (! is_string($value) && ! is_numeric($value)) {
-                throw new InvalidArgumentException(sprintf(
-                    'Invalid value for header "%s": expected a string or number, %s given',
-                    $key,
-                    get_debug_type($value)
-                ));
-            }
-
-            $normalized[$key] = (string)$value;
+            // Keep the first spelling's position and casing, let the last value
+            // win — precisely what PHP's own array assignment already does when
+            // two entries spell the name identically. Position matters: header
+            // order is part of the fingerprint (see CurlProcess::collectHeaderLines()).
+            $slot = $names[strtolower($name)] ??= $name;
+            $normalized[$slot] = $value;
         }
 
         return $normalized;

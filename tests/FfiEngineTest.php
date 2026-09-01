@@ -10,29 +10,26 @@ use Raza\PHPImpersonate\Exception\RequestException;
 /**
  * Live tests for the FFI engine, driven through the PHPImpersonate entry point
  * with engine: ENGINE_FFI. Skipped automatically when FFI or the shared library
- * is unavailable (e.g. CI without libs), or non-functional on this platform.
+ * is unavailable (e.g. CI without libs), or when httpbin is unreachable.
  */
 class FfiEngineTest extends TestCase
 {
-    /** One-time functional probe result. */
-    private static ?bool $functional = null;
-
     protected function setUp(): void
     {
         if (! PHPImpersonate::ffiAvailable()) {
             $this->markTestSkipped('FFI engine not available.');
         }
 
-        if (self::$functional === null) {
-            try {
-                self::$functional = $this->ffi('chrome146')->sendGet(TestServer::httpbin('/get'))->status() === 200;
-            } catch (\Throwable $e) {
-                self::$functional = false;
-            }
-        }
-        if (! self::$functional) {
-            $this->markTestSkipped('FFI engine is not functional in this environment.');
-        }
+        // Diagnose an outage with the service probe, NOT with a live request
+        // through the very engine under test.
+        //
+        // setUp() used to send a real request and, on any Throwable, latch
+        // self::$functional = false for the rest of the process — skipping the
+        // whole class. An httpbin outage, an httpbin 5xx and a genuinely broken
+        // FFI engine were indistinguishable, so the one failure these tests
+        // exist to catch silently removed them from the run. If httpbin answers
+        // and FFI still cannot complete a request, that is a real failure.
+        TestServer::requireHttpbin($this);
     }
 
     /**

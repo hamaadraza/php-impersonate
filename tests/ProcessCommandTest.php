@@ -7,6 +7,7 @@ use InvalidArgumentException;
 use PHPUnit\Framework\TestCase;
 use Raza\PHPImpersonate\Process\CurlProcess;
 use PHPUnit\Framework\Attributes\DataProvider;
+use Raza\PHPImpersonate\Support\RequestPreparer;
 use Raza\PHPImpersonate\Browser\BrowserInterface;
 
 /**
@@ -176,6 +177,82 @@ class ProcessCommandTest extends TestCase
 
         $this->assertContains('User-Agent: ProfileAgent/9.0', $headers);
         $this->assertContains('Accept-Language: en-US', $headers);
+    }
+
+    /**
+     * Header ORDER is part of the fingerprint, not just header content, and the
+     * two engines have to agree on it.
+     *
+     * The FFI engine goes through libcurl's Curl_http_merge_headers: a profile
+     * header keeps its position and a caller header of the same name is
+     * substituted into that slot, while caller-only headers follow at the end.
+     * This engine writes the list itself, so it has to reproduce that exactly.
+     * It used to emit the caller's headers first, which put an Authorization
+     * line ahead of sec-ch-ua — an order no browser produces.
+     */
+    public function testHeaderOrderMatchesTheBrowserProfile(): void
+    {
+        $headers = $this->sentHeaders(
+            [
+                'sec-ch-ua' => '"Chromium";v="131"',
+                'User-Agent' => 'ProfileAgent/9.0',
+                'Accept' => 'text/html',
+                'Accept-Language' => 'en-US',
+            ],
+            [
+                'Authorization' => 'Bearer token',
+                'Accept-Language' => 'de-DE',
+            ]
+        );
+
+        $this->assertSame([
+            // Profile order is preserved outright...
+            'sec-ch-ua: "Chromium";v="131"',
+            'User-Agent: ProfileAgent/9.0',
+            'Accept: text/html',
+            // ...with the caller's value substituted into the profile's slot,
+            // rather than hoisted to the front.
+            'Accept-Language: de-DE',
+            // A header the profile has no counterpart for goes last.
+            'Authorization: Bearer token',
+        ], $headers);
+    }
+
+    /**
+     * Two spellings of one name are one header (RFC 9110 §5.1). Sending both
+     * put two User-Agent lines on the wire — the same bot signal that a caller
+     * header colliding with the profile's was already fixed for.
+     *
+     * Folded in RequestPreparer::normalizeHeaders(), which both engines pass
+     * through, so this covers the executable engine's end of that contract.
+     */
+    public function testCaseVariantCallerHeadersCollapseToOne(): void
+    {
+        $headers = $this->sentHeaders(
+            ['User-Agent' => 'ProfileAgent/9.0', 'Accept' => 'text/html'],
+            RequestPreparer::normalizeHeaders(['User-Agent' => 'First/1.0', 'user-agent' => 'Second/2.0'])
+        );
+
+        // One User-Agent, carrying the last value given, still in the profile's slot.
+        $this->assertSame([
+            'User-Agent: Second/2.0',
+            'Accept: text/html',
+        ], $headers);
+    }
+
+    public function testCallerOnlyHeadersKeepTheirRelativeOrderAtTheEnd(): void
+    {
+        $headers = $this->sentHeaders(
+            ['User-Agent' => 'ProfileAgent/9.0'],
+            ['X-One' => '1', 'X-Two' => '2', 'X-Three' => '3']
+        );
+
+        $this->assertSame([
+            'User-Agent: ProfileAgent/9.0',
+            'X-One: 1',
+            'X-Two: 2',
+            'X-Three: 3',
+        ], $headers);
     }
 
     /**

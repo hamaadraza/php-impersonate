@@ -48,6 +48,10 @@ class EngineParityTest extends TestCase
     #[DataProvider('browserProvider')]
     public function testBothEnginesProduceIdenticalJa4(string $browser): void
     {
+        // Handle a service outage ONCE, here, the way every other TLS test does
+        // — rather than excusing each individual request inside ja4().
+        TestServer::requireTls($this);
+
         $ffi = $this->ja4($browser, PHPImpersonate::ENGINE_FFI);
         $process = $this->ja4($browser, PHPImpersonate::ENGINE_PROCESS);
 
@@ -163,17 +167,30 @@ class EngineParityTest extends TestCase
         $this->assertSame('GET', $method(PHPImpersonate::ENGINE_PROCESS), 'process turned GET+body into another method');
     }
 
+    /**
+     * The JA4 one engine reports for a browser.
+     *
+     * Deliberately without a try/catch. This used to turn every Throwable into
+     * markTestSkipped(), which made the entire parity suite disappear on exactly
+     * the failure it exists to catch: when the bundled shared library is older
+     * than this package's browser list, the FFI engine throws "does not support
+     * target '<browser>'" — and that was reported as an unreachable service and
+     * skipped, leaving CI green. A missing JA4 was excused the same way, which
+     * also hid a body corrupted by an engine bug.
+     *
+     * Outages are handled once by TestServer::requireTls() in the test above;
+     * anything that goes wrong after that is ours, and must fail.
+     */
     private function ja4(string $browser, string $engine): string
     {
-        try {
-            $ja4 = (new PHPImpersonate($browser, 30, [], $engine))
-                ->sendGet(TestServer::tls())->json()['tls']['ja4'] ?? null;
-        } catch (\Throwable $e) {
-            $this->markTestSkipped('TLS-fingerprint service unreachable: ' . $e->getMessage());
-        }
-        if (! is_string($ja4) || $ja4 === '') {
-            $this->markTestSkipped('TLS-fingerprint service returned no JA4');
-        }
+        $response = (new PHPImpersonate($browser, 30, [], $engine))->sendGet(TestServer::tls());
+
+        $this->assertSame(200, $response->status(), "$browser/$engine: the TLS service did not return 200");
+
+        $ja4 = $response->json()['tls']['ja4'] ?? null;
+
+        $this->assertIsString($ja4, "$browser/$engine: the response carried no JA4 fingerprint");
+        $this->assertNotSame('', $ja4, "$browser/$engine: the response carried an empty JA4 fingerprint");
 
         return $ja4;
     }

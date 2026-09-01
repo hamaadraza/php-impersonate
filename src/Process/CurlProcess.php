@@ -333,13 +333,19 @@ final class CurlProcess
     }
 
     /**
-     * Assemble every header line for one request, the caller's first.
+     * Assemble every header line for one request, in the profile's own order.
      *
-     * A caller header REPLACES the profile's of the same name rather than adding
-     * to it: curl emits every header it is handed, so keeping both would put two
-     * User-Agent lines on the wire — a bot signal in its own right, and a
-     * divergence from the FFI engine, where libcurl replaces a profile header by
-     * name. Names are matched case-insensitively (RFC 9110 §5.1).
+     * This reproduces libcurl's `Curl_http_merge_headers`, which is what the FFI
+     * engine goes through, so both engines put the same bytes on the wire: each
+     * profile header keeps its POSITION, a caller header of the same name
+     * (matched case-insensitively, RFC 9110 §5.1) is substituted into that
+     * position rather than added next to it, and caller headers with no profile
+     * counterpart follow at the end.
+     *
+     * Position matters as much as content. Header order is itself a fingerprint,
+     * and emitting the caller's headers first — as this did — put an
+     * Authorization line ahead of `sec-ch-ua`, an ordering no browser produces
+     * and one the FFI engine never emitted.
      *
      * @param array<string,string> $callerHeaders
      * @param array<array-key,mixed> $profileHeaders
@@ -347,27 +353,53 @@ final class CurlProcess
      */
     private function collectHeaderLines(array $callerHeaders, array $profileHeaders): array
     {
-        $lines = [];
-        $supplied = [];
-
+        // Validated up front: every line below ends up in one file, where an
+        // embedded newline would smuggle in an extra header.
+        $pending = [];
         foreach ($callerHeaders as $name => $value) {
             RequestPreparer::assertHeaderIsSafe((string) $name, (string) $value);
-            $supplied[strtolower((string) $name)] = true;
-            $lines[] = "$name: $value";
+            $pending[] = ['name' => strtolower((string) $name), 'line' => "$name: $value"];
         }
 
+        $lines = [];
+
         foreach ($profileHeaders as $name => $value) {
-            if (isset($supplied[strtolower((string) $name)])) {
+            $match = self::findHeader($pending, strtolower((string) $name));
+
+            if ($match !== null) {
+                // Consume it, so that a second caller header of the same name
+                // still reaches the wire from the tail — as libcurl sends it.
+                $lines[] = $pending[$match]['line'];
+                unset($pending[$match]);
+
                 continue;
             }
 
-            // Validated too: profile headers now share a file with the caller's,
-            // where an embedded newline would smuggle in an extra header line.
             RequestPreparer::assertHeaderIsSafe((string) $name, (string) $value);
             $lines[] = "$name: $value";
         }
 
+        foreach ($pending as $header) {
+            $lines[] = $header['line'];
+        }
+
         return $lines;
+    }
+
+    /**
+     * Index of the first unconsumed caller header with this lower-cased name.
+     *
+     * @param array<int, array{name: string, line: string}> $pending
+     */
+    private static function findHeader(array $pending, string $name): ?int
+    {
+        foreach ($pending as $index => $header) {
+            if ($header['name'] === $name) {
+                return $index;
+            }
+        }
+
+        return null;
     }
 
     /**
@@ -390,13 +422,28 @@ final class CurlProcess
      *
      * @param array<string,mixed> $options
      * @return list<string>
+     * @throws RequestException If a value contains a config-file line break.
      */
     private static function configLines(array $options): array
     {
         $lines = [];
 
         foreach ($options as $name => $value) {
-            $escaped = str_replace(['\\', '"'], ['\\\\', '\\"'], (string) $value);
+            $value = (string) $value;
+
+            // Escaping quotes is not enough on its own: the config format is
+            // line-oriented, so a raw newline ends this option and curl parses
+            // the remainder of the value as another one. CurlOptions::assertAllowed()
+            // rejects these already; re-checked at the sink because this class
+            // is constructible directly and only normalize() runs on that path.
+            if (preg_match('/[\r\n\0]/', $value)) {
+                throw new RequestException(sprintf(
+                    'Invalid value for curl option "%s": values may not contain CR, LF, or NUL.',
+                    $name
+                ));
+            }
+
+            $escaped = str_replace(['\\', '"'], ['\\\\', '\\"'], $value);
             $lines[] = sprintf('%s = "%s"', $name, $escaped);
         }
 

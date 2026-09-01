@@ -74,6 +74,18 @@ final class TestServer
             'ssl' => ['verify_peer' => false, 'verify_peer_name' => false],
         ]);
 
-        return @file_get_contents($url, false, $context) !== false;
+        // `@` is not enough here. PHPUnit installs its own error handler, which
+        // promotes the connection warning to a TEST warning regardless of the
+        // suppression operator — and phpunit.xml.dist sets failOnWarning="true",
+        // so an unreachable service FAILED the run instead of skipping it, which
+        // is the exact opposite of what this class exists to do. Swap in a
+        // handler that swallows for the duration of the probe.
+        set_error_handler(static fn (): bool => true);
+
+        try {
+            return file_get_contents($url, false, $context) !== false;
+        } finally {
+            restore_error_handler();
+        }
     }
 }

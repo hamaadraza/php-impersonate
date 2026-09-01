@@ -186,12 +186,47 @@ class TlsDetailedFingerprintTest extends TestCase
             usleep(100000); // 100ms
         }
 
-        // Fingerprints should be valid (non-empty) for the same browser
         foreach ($fingerprints as $fingerprint) {
             $this->assertNotEmpty($fingerprint, 'JA3 fingerprint should not be empty');
         }
-        $uniqueFingerprints = array_unique($fingerprints);
-        $this->assertGreaterThan(0, count($uniqueFingerprints), 'JA3 fingerprint should be present');
+
+        // Chrome 110+ shuffles its TLS extensions on every connection, and the
+        // chrome110 profile turns on tls-permute-extensions to match — so the
+        // JA3 string itself legitimately differs per request, because JA3
+        // encodes extension ORDER. What must not vary is everything the shuffle
+        // does not touch, and the extension SET.
+        //
+        // The old assertion here — assertGreaterThan(0, count(array_unique(…)))
+        // — was true for any non-empty array, so it passed even if all three
+        // requests came back with completely unrelated fingerprints.
+        $invariants = [];
+        $extensionSets = [];
+
+        foreach ($fingerprints as $fingerprint) {
+            $fields = explode(',', $fingerprint);
+            $this->assertCount(5, $fields, "JA3 should have five fields, got: $fingerprint");
+
+            // Version, ciphers, curves and point formats: none of them permute.
+            $invariants[] = implode(',', [$fields[0], $fields[1], $fields[3], $fields[4]]);
+
+            $extensions = explode('-', $fields[2]);
+            sort($extensions);
+            $extensionSets[] = implode('-', $extensions);
+        }
+
+        $this->assertCount(
+            1,
+            array_unique($invariants),
+            'JA3 version/cipher/curve fields must be identical across requests, got: '
+                . implode(' | ', array_unique($invariants))
+        );
+
+        $this->assertCount(
+            1,
+            array_unique($extensionSets),
+            'JA3 must offer the same extension set on every request, got: '
+                . implode(' | ', array_unique($extensionSets))
+        );
     }
 
     /**
@@ -215,12 +250,20 @@ class TlsDetailedFingerprintTest extends TestCase
             usleep(100000); // 100ms
         }
 
-        // Fingerprints should be valid (non-empty) for the same browser
         foreach ($fingerprints as $fingerprint) {
             $this->assertNotEmpty($fingerprint, 'JA4 fingerprint should not be empty');
         }
-        $uniqueFingerprints = array_unique($fingerprints);
-        $this->assertGreaterThan(0, count($uniqueFingerprints), 'JA4 fingerprint should be present');
+
+        // Unlike JA3, JA4 sorts the extension list, so Chrome's per-connection
+        // shuffle does not move it: the fingerprint must be byte-identical every
+        // time. This is the assertion that holds the FFI engine's
+        // CURLOPT_SSL_SESSIONID_CACHE = 0 in place — a resumed handshake adds a
+        // pre_shared_key extension and would change the fingerprint mid-run.
+        $this->assertCount(
+            1,
+            array_unique($fingerprints),
+            'JA4 must be identical across requests, got: ' . implode(' | ', array_unique($fingerprints))
+        );
     }
 
     /**
@@ -328,11 +371,22 @@ class TlsDetailedFingerprintTest extends TestCase
             usleep(100000); // 100ms
         }
 
-        // Verify that HTTP/2 settings are present for all browsers
         foreach ($settings as $browser => $setting) {
             $this->assertNotEmpty($setting, "HTTP/2 settings should be present for $browser");
         }
-        $this->assertGreaterThan(0, count($settings), 'HTTP/2 settings should be present');
+
+        // "Browser-specific" has to mean the three actually DIFFER. The bundled
+        // http2-settings for chrome110, firefox133 and safari153 are three
+        // distinct strings, so identical SETTINGS frames would mean the profile
+        // never reached the wire — which the old count-is-greater-than-zero
+        // assertion could not tell from success.
+        $encoded = array_map(static fn ($setting): string => (string) json_encode($setting), $settings);
+
+        $this->assertCount(
+            count($browsers),
+            array_unique($encoded),
+            'HTTP/2 SETTINGS should differ per browser, got: ' . json_encode($settings)
+        );
     }
 
     /**

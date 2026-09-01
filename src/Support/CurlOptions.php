@@ -117,11 +117,29 @@ final class CurlOptions
         }
 
         foreach ($curlOptions as $key => $value) {
-            if (self::type($key) === self::TYPE_LONG && $value !== null && ! is_numeric($value)) {
+            if ($value === null) {
+                continue;
+            }
+
+            if (self::type($key) === self::TYPE_LONG && ! is_numeric($value)) {
                 throw new InvalidArgumentException(sprintf(
                     'Invalid value for curl option "%s": expected a number, %s given.',
                     $key,
                     var_export($value, true)
+                ));
+            }
+
+            // No control characters in a value, ever. The executable engine
+            // renders the credential-bearing options into curl's config file,
+            // whose format is line-oriented: a newline ends the line and curl
+            // reads whatever follows as ANOTHER option. A `proxy` string from a
+            // rotating-proxy list or a tenant's settings could otherwise smuggle
+            // in `proxy`, `insecure` or `data = @/etc/passwd`. Mirrors the CRLF
+            // rule {@see RequestPreparer::assertHeaderIsSafe()} applies to headers.
+            if (self::type($key) === self::TYPE_STRING && preg_match('/[\r\n\0]/', (string) $value)) {
+                throw new InvalidArgumentException(sprintf(
+                    'Invalid value for curl option "%s": values may not contain CR, LF, or NUL.',
+                    $key
                 ));
             }
         }

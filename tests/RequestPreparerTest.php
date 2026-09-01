@@ -61,6 +61,59 @@ class RequestPreparerTest extends TestCase
     }
 
     /**
+     * Header names are case-insensitive (RFC 9110 §5.1), so two spellings are
+     * one header. Left unfolded they both reached the wire, and
+     * ['User-Agent' => …, 'user-agent' => …] went out as two User-Agent lines —
+     * a bot signal in its own right.
+     *
+     * @param array<int|string,mixed> $headers
+     * @param array<string,string> $expected
+     */
+    #[DataProvider('caseVariantHeaderProvider')]
+    public function testNormalizeHeadersFoldsNamesDifferingOnlyInCase(array $headers, array $expected): void
+    {
+        // assertSame compares order as well as content: which slot the surviving
+        // header occupies decides where it lands on the wire, and header order
+        // is part of the fingerprint.
+        $this->assertSame($expected, RequestPreparer::normalizeHeaders($headers));
+    }
+
+    /**
+     * @return array<string, array{0: array<int|string,mixed>, 1: array<string,string>}>
+     */
+    public static function caseVariantHeaderProvider(): array
+    {
+        return [
+            // The last value wins and the first spelling keeps its slot —
+            // exactly what PHP's own array assignment does for identical keys.
+            'assoc form' => [
+                ['User-Agent' => 'First/1.0', 'user-agent' => 'Second/2.0'],
+                ['User-Agent' => 'Second/2.0'],
+            ],
+            'list form' => [
+                ['User-Agent: First/1.0', 'user-agent: Second/2.0'],
+                ['User-Agent' => 'Second/2.0'],
+            ],
+            'mixed forms' => [
+                ['User-Agent' => 'First/1.0', 'user-agent: Second/2.0'],
+                ['User-Agent' => 'Second/2.0'],
+            ],
+            'three spellings' => [
+                ['x-foo' => '1', 'X-Foo' => '2', 'X-FOO' => '3'],
+                ['x-foo' => '3'],
+            ],
+            'position is the first occurrence\'s' => [
+                ['A' => '1', 'User-Agent' => 'first', 'B' => '2', 'user-agent' => 'last'],
+                ['A' => '1', 'User-Agent' => 'last', 'B' => '2'],
+            ],
+            'distinct names are untouched' => [
+                ['Accept' => 'x', 'Accept-Language' => 'y'],
+                ['Accept' => 'x', 'Accept-Language' => 'y'],
+            ],
+        ];
+    }
+
+    /**
      * The method is normalised at construction so neither engine has to. The FFI
      * engine uppercased before CURLOPT_CUSTOMREQUEST while the executable engine
      * passed -X through verbatim, so `new Request('get', …)` used to reach the

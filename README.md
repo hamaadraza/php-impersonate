@@ -403,11 +403,24 @@ PHPImpersonate::post('https://example.com/api',
     ['name' => 'John'],
     ['Content-Type' => 'application/json']
 );
+
+// multipart/form-data — the boundary is generated and added to the header
+PHPImpersonate::post('https://example.com/api',
+    ['name' => 'John', 'tags' => ['a', 'b']],
+    ['Content-Type' => 'multipart/form-data']
+);
 ```
 
 > [!NOTE]
 > `PUT` and `PATCH` default to **JSON**; `POST` defaults to **form-encoded**.
 > An explicit `Content-Type` always wins.
+
+Nested arrays are flattened to `parent[child]` field names in both the
+form-encoded and multipart encodings, `null` values are dropped and booleans
+become `1`/`0` — so the two carry the same data and only the framing differs.
+Supply your own `boundary=` in the `Content-Type` to control it; otherwise one
+is generated for you. File uploads are not supported: pass a pre-encoded body
+via `Request` if you need them.
 
 ## Timeouts
 

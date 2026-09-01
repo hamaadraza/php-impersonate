@@ -63,7 +63,8 @@ final class RequestPreparer
             $contentType = $defaultContentType;
         }
 
-        if (str_contains($contentType, 'application/json')) {
+        // Media types are case-insensitive (RFC 9110 6.4.1), so match them that way.
+        if (stripos($contentType, 'application/json') !== false) {
             try {
                 return json_encode($data, JSON_THROW_ON_ERROR);
             } catch (\JsonException $e) {
@@ -71,7 +72,150 @@ final class RequestPreparer
             }
         }
 
+        if (stripos($contentType, 'multipart/form-data') !== false) {
+            return self::encodeMultipart($data, $headers, $contentType);
+        }
+
         return http_build_query($data);
+    }
+
+    /**
+     * Encode $data as a real multipart/form-data body.
+     *
+     * Asking for multipart used to hand back an http_build_query() string — a
+     * urlencoded body wearing a multipart Content-Type, with no boundary at all.
+     * Every conforming parser reads that as an empty form (PHP's own included),
+     * so the request silently did nothing and nothing said so.
+     *
+     * The caller's boundary is used when they supplied one; otherwise a random
+     * one is generated and written back into their Content-Type header, since a
+     * multipart body without a boundary parameter is unparseable.
+     *
+     * @param array<string,mixed> $data
+     * @param array<string,string> $headers Content-Type is updated in place.
+     * @throws InvalidArgumentException
+     */
+    private static function encodeMultipart(array $data, array &$headers, string $contentType): string
+    {
+        $fields = self::flattenFields($data);
+        $boundary = self::boundaryFrom($contentType);
+
+        if ($boundary === null) {
+            $boundary = '----PHPImpersonateFormBoundary' . bin2hex(random_bytes(16));
+            self::setHeader($headers, 'Content-Type', rtrim($contentType, "; \t") . '; boundary=' . $boundary);
+        }
+
+        $body = '';
+
+        foreach ($fields as [$name, $value]) {
+            // A value containing the delimiter would terminate the body early and
+            // truncate the form. Unreachable with a generated boundary; a caller
+            // who supplied their own gets told rather than sending a broken body.
+            if (str_contains($value, $boundary)) {
+                throw new InvalidArgumentException(sprintf(
+                    'Cannot encode multipart body: the value of "%s" contains the boundary "%s".',
+                    $name,
+                    $boundary
+                ));
+            }
+
+            $body .= '--' . $boundary . "\r\n";
+            $body .= 'Content-Disposition: form-data; name="' . self::escapeFieldName($name) . '"' . "\r\n\r\n";
+            $body .= $value . "\r\n";
+        }
+
+        return $body . '--' . $boundary . "--\r\n";
+    }
+
+    /**
+     * Flatten nested arrays into "parent[child]" field names, and render scalars
+     * exactly as the urlencoded path does — nulls dropped, bools as 1/0 — so the
+     * two encodings carry the same data rather than differing by content type.
+     *
+     * @param array<array-key,mixed> $data
+     * @return list<array{0: string, 1: string}>
+     * @throws InvalidArgumentException
+     */
+    private static function flattenFields(array $data, string $prefix = ''): array
+    {
+        $fields = [];
+
+        foreach ($data as $key => $value) {
+            $name = $prefix === '' ? (string) $key : $prefix . '[' . $key . ']';
+
+            if (is_array($value)) {
+                foreach (self::flattenFields($value, $name) as $nested) {
+                    $fields[] = $nested;
+                }
+
+                continue;
+            }
+
+            if ($value === null) {
+                continue;
+            }
+
+            if (is_bool($value)) {
+                $fields[] = [$name, $value ? '1' : '0'];
+
+                continue;
+            }
+
+            if (! is_scalar($value)) {
+                throw new InvalidArgumentException(sprintf(
+                    'Cannot encode multipart body: the value of "%s" must be a scalar or array, %s given.',
+                    $name,
+                    get_debug_type($value)
+                ));
+            }
+
+            $fields[] = [$name, (string) $value];
+        }
+
+        return $fields;
+    }
+
+    /**
+     * Percent-encode the characters that would otherwise break out of the
+     * quoted field name and forge a part header — the same substitution browsers
+     * make (HTML standard, "multipart/form-data encoding algorithm").
+     */
+    private static function escapeFieldName(string $name): string
+    {
+        return str_replace(["\0", "\r", "\n", '"'], ['%00', '%0D', '%0A', '%22'], $name);
+    }
+
+    /**
+     * The boundary already declared in a Content-Type, or null when there is none.
+     */
+    private static function boundaryFrom(string $contentType): ?string
+    {
+        if (! preg_match('/;\s*boundary\s*=\s*(?:"([^"]*)"|([^;\s]+))/i', $contentType, $m)) {
+            return null;
+        }
+
+        $boundary = ($m[1] !== '' ? $m[1] : ($m[2] ?? ''));
+
+        return $boundary !== '' ? $boundary : null;
+    }
+
+    /**
+     * Set a header, replacing any existing spelling of the name in place so the
+     * caller's casing and position survive.
+     *
+     * @param array<string,string> $headers
+     */
+    private static function setHeader(array &$headers, string $name, string $value): void
+    {
+        foreach ($headers as $key => $_) {
+            if (is_string($key) && strcasecmp($key, $name) === 0) {
+                $headers[$key] = $value;
+
+                return;
+            }
+        }
+
+        $headers[$name] = $value;
     }
 
     /**

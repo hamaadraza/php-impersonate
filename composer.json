@@ -48,6 +48,7 @@
     "update-impersonate": "@php scripts/update-impersonate.php",
     "update-browsers": "@php scripts/update-browsers.php",
     "update-binaries": "@php scripts/update-binaries.php",
+    "update-fingerprint-baseline": "@php scripts/update-fingerprint-baseline.php",
     "update-libraries": "@php scripts/update-binaries.php --libs-only",
     "install-binaries": "@php bin/php-impersonate-install"
   },

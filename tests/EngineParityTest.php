@@ -151,6 +151,42 @@ class EngineParityTest extends TestCase
         );
     }
 
+    /**
+     * A multipart body has to be accepted by a real parser, on both engines.
+     *
+     * Requesting multipart used to yield an http_build_query() string under a
+     * boundary-less multipart Content-Type; httpbin answered 200 and threw the
+     * body away, so the caller saw success and the server saw an empty form.
+     */
+    public function testMultipartFormDataIsParsedByTheServerOnBothEngines(): void
+    {
+        TestServer::requireHttpbin($this);
+
+        $forms = [];
+        foreach ([PHPImpersonate::ENGINE_FFI, PHPImpersonate::ENGINE_PROCESS] as $engine) {
+            $response = (new PHPImpersonate('chrome146', 30, [], $engine))->sendPost(
+                TestServer::httpbin('/post'),
+                ['name' => 'Ada', 'role' => 'eng'],
+                ['Content-Type' => 'multipart/form-data']
+            );
+
+            $this->assertSame(200, $response->status(), "$engine did not return 200");
+
+            $forms[$engine] = $response->json()['form'] ?? [];
+            $this->assertSame(
+                ['name' => 'Ada', 'role' => 'eng'],
+                $forms[$engine],
+                "$engine sent a multipart body the server could not parse"
+            );
+        }
+
+        $this->assertSame(
+            $forms[PHPImpersonate::ENGINE_FFI],
+            $forms[PHPImpersonate::ENGINE_PROCESS],
+            'engines disagreed on the multipart body'
+        );
+    }
+
     public function testGetWithBodyKeepsMethodOnBothEngines(): void
     {
         TestServer::requireHttpbin($this);

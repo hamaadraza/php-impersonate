@@ -191,6 +191,114 @@ class RequestPreparerTest extends TestCase
         $this->assertSame('application/json', $headers['Content-Type']);
     }
 
+    /**
+     * Asking for multipart used to return an http_build_query() string with a
+     * boundary-less multipart Content-Type on it. Against httpbin that body was
+     * discarded outright — the server answered 200 with an empty form — so the
+     * request silently did nothing.
+     */
+    public function testPrepareBodyEncodesMultipartAndAddsABoundary(): void
+    {
+        $headers = ['Content-Type' => 'multipart/form-data'];
+        $body = RequestPreparer::prepareBody(['name' => 'Ada', 'role' => 'eng'], $headers);
+
+        // The header must now carry the boundary the body actually uses;
+        // without one, no conforming parser can read a single field.
+        $this->assertMatchesRegularExpression(
+            '#^multipart/form-data; boundary=\S+$#',
+            $headers['Content-Type']
+        );
+
+        preg_match('/boundary=(\S+)/', $headers['Content-Type'], $m);
+        $boundary = $m[1];
+
+        $this->assertSame(
+            "--$boundary\r\n"
+            . "Content-Disposition: form-data; name=\"name\"\r\n\r\n"
+            . "Ada\r\n"
+            . "--$boundary\r\n"
+            . "Content-Disposition: form-data; name=\"role\"\r\n\r\n"
+            . "eng\r\n"
+            . "--$boundary--\r\n",
+            $body
+        );
+    }
+
+    public function testPrepareBodyKeepsACallerSuppliedBoundary(): void
+    {
+        // Rewriting the caller's boundary would contradict the header they set.
+        $headers = ['content-type' => 'multipart/form-data; boundary=XYZ'];
+        $body = RequestPreparer::prepareBody(['a' => '1'], $headers);
+
+        $this->assertSame('multipart/form-data; boundary=XYZ', $headers['content-type']);
+        $this->assertSame(
+            "--XYZ\r\nContent-Disposition: form-data; name=\"a\"\r\n\r\n1\r\n--XYZ--\r\n",
+            $body
+        );
+    }
+
+    public function testPrepareBodyDetectsMultipartRegardlessOfCase(): void
+    {
+        // Media types are case-insensitive (RFC 9110 6.4.1).
+        $headers = ['Content-Type' => 'Multipart/Form-Data; boundary=B'];
+        $body = RequestPreparer::prepareBody(['a' => '1'], $headers);
+
+        $this->assertStringStartsWith('--B', $body);
+    }
+
+    /**
+     * The multipart and urlencoded paths must carry the same data — only the
+     * framing differs — so field names are flattened the same way, nulls are
+     * dropped and bools render as 1/0.
+     */
+    public function testPrepareBodyFlattensFieldsLikeHttpBuildQuery(): void
+    {
+        $data = ['u' => ['n' => 'x', 'tags' => ['a', 'b']], 'ok' => true, 'skip' => null];
+
+        $headers = ['Content-Type' => 'multipart/form-data; boundary=B'];
+        $body = RequestPreparer::prepareBody($data, $headers);
+
+        preg_match_all('/name="([^"]*)"/', $body, $m);
+
+        // The same field names http_build_query() would have produced.
+        $this->assertSame(['u[n]', 'u[tags][0]', 'u[tags][1]', 'ok'], $m[1]);
+        $this->assertStringNotContainsString('skip', $body);
+        $this->assertStringContainsString("\r\n\r\n1\r\n", $body);
+    }
+
+    /**
+     * A field name is written into a quoted part header, so a quote or a CRLF in
+     * it could forge an extra part — the multipart equivalent of header
+     * injection. Browsers percent-encode exactly these; so do we.
+     */
+    public function testPrepareBodyNeutralisesFieldNameInjection(): void
+    {
+        $headers = ['Content-Type' => 'multipart/form-data; boundary=B'];
+        $body = RequestPreparer::prepareBody(["ev\"il\r\nX-Injected: 1" => 'v'], $headers);
+
+        $this->assertStringContainsString('name="ev%22il%0D%0AX-Injected: 1"', $body);
+        $this->assertSame(1, substr_count($body, 'Content-Disposition'));
+    }
+
+    public function testPrepareBodyRejectsAValueContainingTheBoundary(): void
+    {
+        // Would terminate the body early and truncate the form.
+        $this->expectException(InvalidArgumentException::class);
+        $this->expectExceptionMessage('contains the boundary');
+
+        $headers = ['Content-Type' => 'multipart/form-data; boundary=SECRET'];
+        RequestPreparer::prepareBody(['a' => 'xx--SECRET--yy'], $headers);
+    }
+
+    public function testPrepareBodyRejectsNonScalarMultipartValues(): void
+    {
+        $this->expectException(InvalidArgumentException::class);
+        $this->expectExceptionMessage('must be a scalar or array');
+
+        $headers = ['Content-Type' => 'multipart/form-data; boundary=B'];
+        RequestPreparer::prepareBody(['a' => new \stdClass()], $headers);
+    }
+
     public function testValidateRequestRejectsEmptyUrl(): void
     {
         $this->expectException(InvalidArgumentException::class);

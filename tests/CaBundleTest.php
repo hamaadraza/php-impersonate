@@ -4,6 +4,7 @@ namespace Raza\PHPImpersonate\Tests;
 
 use PHPUnit\Framework\TestCase;
 use Raza\PHPImpersonate\Support\CaBundle;
+use Raza\PHPImpersonate\Exception\RequestException;
 
 /**
  * CA bundle resolution. Pure unit tests — no binary or network required.
@@ -76,16 +77,17 @@ class CaBundleTest extends TestCase
         $this->assertSame($preferred, CaBundle::path());
     }
 
-    public function testUnreadableEnvPathFallsBackToSystemPaths(): void
+    public function testUnreadableEnvPathThrowsInsteadOfWideningTrust(): void
     {
+        // An operator setting this is usually NARROWING what to trust, so
+        // quietly substituting the distro bundle widens it back — the opposite
+        // of the instruction, and invisible. Fail closed instead, as curl does.
         putenv('SSL_CERT_FILE=/nonexistent/nope.pem');
 
-        $resolved = CaBundle::path();
+        $this->expectException(RequestException::class);
+        $this->expectExceptionMessage('/nonexistent/nope.pem');
 
-        $this->assertNotSame('/nonexistent/nope.pem', $resolved);
-        if ($resolved !== null) {
-            $this->assertFileExists($resolved);
-        }
+        CaBundle::path();
     }
 
     public function testEmptyEnvValueIsIgnored(): void

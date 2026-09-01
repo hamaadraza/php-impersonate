@@ -86,12 +86,79 @@ class FfiEngineTest extends TestCase
         $this->assertIsArray($response->json()); // json() would throw if still gzip
     }
 
+    /**
+     * Keep-alive reuse is the entire reason the FFI engine holds one easy handle
+     * across requests (curl_easy_reset preserves the connection cache) and the
+     * reason PHPImpersonate caches engines per config. Three 200s could never
+     * show that: they pass identically whether the connection is reused or a
+     * fresh TCP+TLS handshake happens each time.
+     *
+     * A local server that counts ACCEPTED CONNECTIONS can. Three requests over a
+     * reused connection produce exactly one accept; without reuse, three.
+     */
     public function testConnectionIsReusedAcrossRequests(): void
     {
-        $client = $this->ffi('chrome146');
-        for ($i = 0; $i < 3; $i++) {
-            $this->assertSame(200, $client->sendGet(TestServer::httpbin('/get'))->status());
+        $port = 18932;
+        $script = sprintf(
+            '<?php $s=stream_socket_server("tcp://127.0.0.1:%d",$e,$m); $n=0;'
+            . '$deadline=time()+20;'
+            . 'while(time()<$deadline){ $c=@stream_socket_accept($s,2); if(!$c){continue;} $n++;'
+            // Recorded the moment a connection is accepted, so the test can read
+            // the tally as soon as its requests are done instead of waiting for
+            // this loop to time out.
+            . '  file_put_contents("%s",$n);'
+            . '  stream_set_timeout($c,2);'
+            . '  while(true){ $req=""; while(($l=fgets($c))!==false){ $req.=$l; if($l==="\r\n"||$l==="\n"){break;} }'
+            . '    if($req===""){break;}'
+            . '    fwrite($c,"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: keep-alive\r\n\r\nok"); }'
+            . '  fclose($c); }',
+            $port,
+            $countFile = sys_get_temp_dir() . '/php-impersonate-accepts-' . getmypid()
+        );
+
+        $scriptFile = sys_get_temp_dir() . '/php-impersonate-keepalive-' . getmypid() . '.php';
+        file_put_contents($scriptFile, $script);
+        // Guarded rather than suppressed: phpunit.xml.dist sets
+        // failOnWarning="true", and PHPUnit promotes unlink()'s warning even
+        // through `@`.
+        if (is_file($countFile)) {
+            unlink($countFile);
         }
+
+        $server = proc_open(['php', $scriptFile], [1 => ['pipe', 'w'], 2 => ['pipe', 'w']], $pipes);
+        $this->assertIsResource($server);
+        usleep(400000);
+
+        try {
+            $client = $this->ffi('chrome146');
+            for ($i = 0; $i < 3; $i++) {
+                $this->assertSame(200, $client->sendGet("http://127.0.0.1:$port/get")->status());
+            }
+        } finally {
+            foreach ($pipes as $pipe) {
+                if (is_resource($pipe)) {
+                    fclose($pipe);
+                }
+            }
+            if (is_resource($server)) {
+                proc_terminate($server);
+                proc_close($server);
+            }
+            if (is_file($scriptFile)) {
+                unlink($scriptFile);
+            }
+        }
+
+        $accepts = is_file($countFile) ? (int) file_get_contents($countFile) : -1;
+        if (is_file($countFile)) {
+            unlink($countFile);
+        }
+
+        $this->assertSame(
+            1,
+            $accepts,
+            "three requests should share one connection, but the server accepted $accepts"
+        );
     }
 
     public function testBinaryBodyIsSentVerbatim(): void

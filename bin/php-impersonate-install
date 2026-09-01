@@ -5,9 +5,10 @@
  * Download the curl-impersonate binary (and shared library) for the CURRENT
  * platform into this package's bin/ directory.
  *
- * The package ships binaries for mainstream x86_64 platforms (Linux glibc,
- * macOS, Windows) only. On any other platform — Linux musl/Alpine, ARM64, Apple
- * Silicon — run this once after install to fetch the matching artifacts:
+ * The package ships binaries for linux-x86_64 (glibc), linux-x86_64-musl,
+ * macos-aarch64 (Apple Silicon) and windows-x86_64. On any OTHER platform —
+ * Linux ARM64 (glibc or musl), or an Intel Mac — run this once after install to
+ * fetch the matching artifacts:
  *
  *   php vendor/hamaadraza/php-impersonate/bin/php-impersonate-install
  *   # or, from a clone of this package:
@@ -67,20 +68,49 @@ try {
     $binPath = $root . "/bin/$dir/" . $spec['dest'];
     $libPath = $root . "/bin/$dir/" . $installer->libDestName($dir);
     $haveBin = is_file($binPath);
-    $haveLib = $opts['no-libs'] || is_file($libPath);
+    $wantLib = ! $opts['no-libs'] && $installer->libIsUsable($dir);
+    $haveLib = ! $wantLib || is_file($libPath);
 
-    if (! $opts['force'] && $haveBin && $haveLib) {
-        fwrite(STDOUT, "curl-impersonate is already installed for $dir ($version). Nothing to do.\n");
+    // The presence of a file says nothing about its VERSION, so an explicit
+    // --version must never be answered with "already installed". It was: the
+    // message even quoted the requested tag back, so a user pinning a build got
+    // "already installed for linux-x86_64 (v2.2.0)" while v2.1.1 sat on disk.
+    $pinned = $opts['version'] !== null;
+
+    if (! $opts['force'] && ! $pinned && $haveBin && $haveLib) {
+        $bundled = is_file($root . '/bin/VERSION')
+            ? trim((string) file_get_contents($root . '/bin/VERSION'))
+            : 'unknown version';
+        fwrite(STDOUT, "curl-impersonate is already installed for $dir ($bundled). Nothing to do.\n");
+        fwrite(STDOUT, "Use --force to reinstall, or --version=TAG to install a specific release.\n");
         exit(0);
     }
 
-    fwrite(STDOUT, "Installing curl-impersonate $version for $dir ...\n");
+    if ($pinned && $haveBin && $haveLib && ! $opts['force']) {
+        fwrite(STDOUT, "Reinstalling for $dir at the requested version $version ...\n");
+    } else {
+        fwrite(STDOUT, "Installing curl-impersonate $version for $dir ...\n");
+    }
 
-    $result = $installer->install($version, $dir, $spec);
+    // Verify against the committed digests, but only when installing the
+    // version those digests were taken for — a deliberate upgrade to another
+    // tag legitimately hashes differently.
+    $bundledVersion = is_file($root . '/bin/VERSION')
+        ? trim((string) file_get_contents($root . '/bin/VERSION'))
+        : null;
+    $manifest = ($bundledVersion !== null && $version === $bundledVersion)
+        ? $installer->readChecksums()
+        : [];
+
+    if ($manifest === [] && $bundledVersion !== null && $version !== $bundledVersion) {
+        fwrite(STDOUT, "  note:    installing $version, not the bundled $bundledVersion — checksums not pinned.\n");
+    }
+
+    $result = $installer->install($version, $dir, $spec, $manifest);
     fwrite(STDOUT, '  binary:  ' . $result['message'] . "\n");
 
-    if (! $opts['no-libs']) {
-        $lib = $installer->installLib($version, $dir, $spec);
+    if ($wantLib) {
+        $lib = $installer->installLib($version, $dir, $spec, $manifest);
         fwrite(STDOUT, '  library: ' . $lib['message'] . "\n");
     }
 

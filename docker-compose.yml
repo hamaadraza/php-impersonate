@@ -7,9 +7,15 @@
 # (the same one that runs at httpbin.org). Running it locally makes the test
 # suite fast, reliable and offline-capable instead of depending on public
 # services that regularly go down.
+# mccutchen/go-httpbin rather than kennethreitz/httpbin: the latter publishes a
+# single amd64 image and has not been rebuilt since 2018 (Python 2), so on
+# macOS ARM64 — one of this package's bundled first-class platforms — it either
+# runs emulated or refuses to start, pushing the suite back onto the flaky
+# public service this file exists to avoid. go-httpbin serves the same API and
+# ships both amd64 and arm64.
 services:
   httpbin:
-    image: kennethreitz/httpbin
+    image: mccutchen/go-httpbin:v2.15.0
     ports:
       - "8080:80"
     restart: unless-stopped

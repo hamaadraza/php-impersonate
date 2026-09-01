@@ -433,25 +433,41 @@ class ProcessCommandTest extends TestCase
         if ($expectedPresent) {
             $this->assertContains('--insecure', $argv);
             $index = (int) array_search('--insecure', $argv, true);
-            // Whatever follows must be another flag or the URL, never a value.
+            // Whatever follows must be another flag, never a value.
             $next = $argv[$index + 1] ?? '';
             $this->assertTrue(
-                str_starts_with($next, '-') || $next === 'https://example.com/',
+                str_starts_with($next, '-'),
                 "--insecure was followed by a stray argument: '$next'"
             );
         } else {
             $this->assertNotContains('--insecure', $argv);
         }
 
-        // The URL must remain the one and only positional argument.
+        // There must be NO positional argument at all: every flag takes its own
+        // value, and the URL now travels in the --config file so it cannot be
+        // read out of /proc/<pid>/cmdline. A loose bool rendered as a detached
+        // `no` would show up right here — which the previous version of this
+        // assertion could not see, because it filtered the list down to
+        // https:// entries before comparing, discarding the very argument it
+        // was written to catch.
         $positionals = array_values(array_filter(
             array_slice($argv, 1),
-            fn ($a) => ! str_starts_with($a, '-') && ! str_contains($a, ': ') && ! str_starts_with($a, '/tmp/')
+            fn ($a) => ! str_starts_with($a, '-') && ! $this->isValueOfPrecedingFlag($argv, $a)
         ));
-        $this->assertSame(['https://example.com/'], array_values(array_filter(
-            $positionals,
-            fn ($a) => str_starts_with($a, 'https://')
-        )));
+
+        $this->assertSame([], $positionals, 'argv must carry no positional arguments');
+    }
+
+    /**
+     * Whether this argument is consumed as the value of the flag before it.
+     *
+     * @param list<string> $argv
+     */
+    private function isValueOfPrecedingFlag(array $argv, string $arg): bool
+    {
+        $index = array_search($arg, $argv, true);
+
+        return $index !== false && $index > 0 && str_starts_with($argv[$index - 1], '-');
     }
 
     /**

@@ -14,8 +14,120 @@ final class BinaryInstaller
     private const RELEASE_ASSET = 'curl-impersonate-%s.%s.tar.gz';
     private const LIB_ASSET = 'libcurl-impersonate-%s.%s.tar.gz';
 
+    /**
+     * Committed record of what every bundled artifact should hash to.
+     *
+     * Upstream publishes no checksums and no signatures — 41 assets on the
+     * latest release, not one of them a digest — so there is nothing to verify a
+     * download against at the source. What we can do is pin: the maintainer
+     * records a digest for each artifact at update time, and every later install
+     * checks against it. That turns an unverified download into a
+     * trust-on-first-use pin, and it catches the case that is reachable without
+     * any attacker at all — a truncated or corrupted download being installed
+     * and shipped, which nothing detected for the six platforms that cannot be
+     * executed on the host.
+     */
+    private const CHECKSUM_FILE = 'CHECKSUMS';
+
     public function __construct(private string $binDir)
     {
+    }
+
+    public function checksumPath(): string
+    {
+        return $this->binDir . '/' . self::CHECKSUM_FILE;
+    }
+
+    public function sha256(string $path): string
+    {
+        $hash = hash_file('sha256', $path);
+        if ($hash === false) {
+            throw new \RuntimeException("Could not hash $path");
+        }
+
+        return $hash;
+    }
+
+    /**
+     * Read the committed manifest as "bin-relative path => sha256".
+     *
+     * @return array<string, string>
+     */
+    public function readChecksums(): array
+    {
+        $file = $this->checksumPath();
+        if (! is_file($file)) {
+            return [];
+        }
+
+        $out = [];
+        foreach (file($file, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES) ?: [] as $line) {
+            if ($line === '' || $line[0] === '#') {
+                continue;
+            }
+            // "<sha256>  <relative/path>", the sha256sum(1) format.
+            if (preg_match('/^([0-9a-f]{64})\s+(\S.*)$/', $line, $m)) {
+                $out[$m[2]] = $m[1];
+            }
+        }
+
+        return $out;
+    }
+
+    /**
+     * Rewrite the manifest, merging new entries over whatever is recorded.
+     *
+     * Merged rather than replaced so a partial run — `--only=…`, `--libs-only` —
+     * updates just the artifacts it touched and leaves the rest intact.
+     *
+     * @param array<string, string> $entries bin-relative path => sha256
+     */
+    public function writeChecksums(array $entries, string $version): void
+    {
+        $all = array_merge($this->readChecksums(), $entries);
+        ksort($all);
+
+        $lines = [
+            '# sha256 digests of the bundled curl-impersonate artifacts.',
+            '# Written by scripts/update-binaries.php; verified by bin/php-impersonate-install.',
+            '# Upstream ships no checksums, so these are a trust-on-first-use pin.',
+            '# Last updated for release: ' . $version,
+        ];
+        foreach ($all as $path => $hash) {
+            $lines[] = sprintf('%s  %s', $hash, $path);
+        }
+
+        file_put_contents($this->checksumPath(), implode("\n", $lines) . "\n");
+    }
+
+    /**
+     * Check a freshly installed artifact against the committed manifest.
+     *
+     * A path absent from the manifest is accepted — that is the maintainer
+     * adding an artifact for the first time, and the digest is recorded on the
+     * way out. A path present but DIFFERENT is refused.
+     *
+     * @param array<string, string> $manifest
+     * @throws \RuntimeException on mismatch
+     */
+    public function assertMatchesManifest(array $manifest, string $relPath, string $absPath): void
+    {
+        if (! isset($manifest[$relPath])) {
+            return;
+        }
+
+        $actual = $this->sha256($absPath);
+        if (! hash_equals($manifest[$relPath], $actual)) {
+            throw new \RuntimeException(sprintf(
+                "Checksum mismatch for %s.\n  expected %s\n  actual   %s\n"
+                . 'The download does not match the digest committed in bin/%s. Refusing to install it. '
+                . 'If this is an intentional upgrade, run scripts/update-binaries.php to re-pin.',
+                $relPath,
+                $manifest[$relPath],
+                $actual,
+                self::CHECKSUM_FILE
+            ));
+        }
     }
 
     /**
@@ -60,9 +172,10 @@ final class BinaryInstaller
      * Download, extract and install one platform's binary.
      *
      * @param array{triple: string, member: string, dest: string, executable: bool} $spec
-     * @return array{message: string, verified: bool}
+     * @param array<string, string> $manifest Committed digests to check against.
+     * @return array{message: string, verified: bool, path: string, sha256: string}
      */
-    public function install(string $version, string $dir, array $spec): array
+    public function install(string $version, string $dir, array $spec, array $manifest = []): array
     {
         $asset = $this->assetName($version, $spec);
         $url = sprintf('https://github.com/%s/releases/download/%s/%s', self::REPO, $version, $asset);
@@ -97,9 +210,19 @@ final class BinaryInstaller
 
             $this->stripSymbols($dest, $dir);
 
+            // Checked AFTER stripping, because stripping is what the committed
+            // digest was taken over.
+            $relPath = $dir . '/' . $spec['dest'];
+            $this->assertMatchesManifest($manifest, $relPath, $dest);
+
             $verified = false;
             $note = 'installed';
-            if ($spec['executable'] && $this->isHostPlatform($dir)) {
+
+            // Gated on the HOST being able to run it, not on the 'executable'
+            // flag — that flag only means "needs chmod", and it is false for
+            // windows-x86_64, so a Windows host never ran the one check that
+            // would catch a corrupt curl.exe while every other host did.
+            if ($this->isHostPlatform($dir)) {
                 $verified = $this->verify($dest);
                 if (! $verified) {
                     throw new \RuntimeException("Installed binary failed --version IMPERSONATE check: $dest");
@@ -107,7 +230,12 @@ final class BinaryInstaller
                 $note = 'installed + verified (' . $this->versionString($dest) . ')';
             }
 
-            return ['message' => $note, 'verified' => $verified];
+            return [
+                'message' => $note,
+                'verified' => $verified,
+                'path' => $relPath,
+                'sha256' => $this->sha256($dest),
+            ];
         } finally {
             $this->rmrf($work);
         }
@@ -126,6 +254,20 @@ final class BinaryInstaller
     public function libAssetName(string $version, array $spec): string
     {
         return sprintf(self::LIB_ASSET, $version, $spec['triple']);
+    }
+
+    /**
+     * Whether the FFI shared library is of any use on this platform.
+     *
+     * It is not on Windows: the FFI engine captures responses through
+     * open_memstream, which no Windows build exports, so
+     * CurlImpersonate::isSupported() refuses Windows outright and
+     * LibResolver deliberately knows no .dll names. Installing one there put
+     * ~3.9 MB into every package for a file nothing could ever load.
+     */
+    public function libIsUsable(string $dir): bool
+    {
+        return ! str_starts_with($dir, 'windows');
     }
 
     /**
@@ -148,9 +290,10 @@ final class BinaryInstaller
      * (for the optional FFI client). Symlinks are resolved to the real object.
      *
      * @param array{triple: string, member: string, dest: string, executable: bool} $spec
-     * @return array{message: string}
+     * @param array<string, string> $manifest Committed digests to check against.
+     * @return array{message: string, path: string, sha256: string}
      */
-    public function installLib(string $version, string $dir, array $spec): array
+    public function installLib(string $version, string $dir, array $spec, array $manifest = []): array
     {
         $asset = $this->libAssetName($version, $spec);
         $url = sprintf('https://github.com/%s/releases/download/%s/%s', self::REPO, $version, $asset);
@@ -182,7 +325,14 @@ final class BinaryInstaller
 
             $this->stripSymbols($dest, $dir);
 
-            return ['message' => 'library installed (' . $this->humanSize(filesize($dest) ?: 0) . ')'];
+            $relPath = $dir . '/' . $this->libDestName($dir);
+            $this->assertMatchesManifest($manifest, $relPath, $dest);
+
+            return [
+                'message' => 'library installed (' . $this->humanSize(filesize($dest) ?: 0) . ')',
+                'path' => $relPath,
+                'sha256' => $this->sha256($dest),
+            ];
         } finally {
             $this->rmrf($work);
         }

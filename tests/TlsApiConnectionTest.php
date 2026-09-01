@@ -4,6 +4,7 @@ namespace Raza\PHPImpersonate\Tests;
 
 use PHPUnit\Framework\TestCase;
 use Raza\PHPImpersonate\PHPImpersonate;
+use Raza\PHPImpersonate\Exception\RequestException;
 
 class TlsApiConnectionTest extends TestCase
 {
@@ -172,8 +173,13 @@ class TlsApiConnectionTest extends TestCase
     {
         $client = new PHPImpersonate('chrome110');
 
-        // Test with invalid URL
-        $this->expectException(\Exception::class);
+        // RequestException specifically, not bare \Exception. The URL below is
+        // perfectly valid, so the only correct way to fail it is a TRANSPORT
+        // error; expecting \Exception also accepted an InvalidArgumentException,
+        // meaning a validation regression that rejected this URL outright would
+        // still have satisfied the test while the error path it names went
+        // completely unexercised.
+        $this->expectException(RequestException::class);
         $client->sendGet('https://invalid-domain-that-does-not-exist-12345.com');
     }
 

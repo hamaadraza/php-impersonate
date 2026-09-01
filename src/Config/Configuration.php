@@ -61,12 +61,39 @@ class Configuration
     }
 
     /**
+     * The built-in defaults, kept so {@see reset()} can actually restore them.
+     *
+     * @var array<string, array<string, mixed>>|null
+     */
+    private static ?array $defaults = null;
+
+    /**
+     * Restore the built-in per-platform configuration, discarding every
+     * override — including whole platforms added at runtime.
+     *
+     * {@see setPlatformConfig()} MERGES, so it can overwrite a key but never
+     * remove one: a test that saved the config and set it back could not undo
+     * an added key, and never touched a platform entry that had not existed
+     * before. With the suite running in random order that made any assertion
+     * about the exact shape of getPlatformConfig() depend on what ran first.
+     */
+    public static function reset(): void
+    {
+        if (self::$defaults !== null) {
+            self::$platformConfigs = self::$defaults;
+        }
+    }
+
+    /**
      * Set configuration for a platform
      *
      * @param array<string,mixed> $config
      */
     public static function setPlatformConfig(string $platform, array $config): void
     {
+        // Snapshot the pristine defaults the first time anything overrides them.
+        self::$defaults ??= self::$platformConfigs;
+
         // Merge onto the platform's own existing config so a partial override
         // keeps that platform's defaults; fall back to Linux only for new platforms
         self::$platformConfigs[$platform] = array_merge(

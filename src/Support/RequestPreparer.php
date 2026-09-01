@@ -2,8 +2,8 @@
 
 namespace Raza\PHPImpersonate\Support;
 
-use InvalidArgumentException;
 use Raza\PHPImpersonate\Request;
+use Raza\PHPImpersonate\Exception\InvalidArgumentException;
 
 /**
  * Transport-independent request preparation: URL/scheme validation, header
@@ -97,8 +97,13 @@ final class RequestPreparer
             $contentType = $defaultContentType;
         }
 
-        // Media types are case-insensitive (RFC 9110 6.4.1), so match them that way.
-        if (stripos($contentType, 'application/json') !== false) {
+        // Media types are case-insensitive (RFC 9110 6.4.1), so match them that
+        // way. The `+json` structured-syntax suffix (RFC 6839) counts too:
+        // application/vnd.api+json, application/merge-patch+json,
+        // application/problem+json and application/ld+json are all JSON, and a
+        // literal 'application/json' test sent them as urlencoded form data
+        // under a JSON content type — a body the server can only reject.
+        if (preg_match('#[/+]json\b#i', $contentType)) {
             try {
                 return json_encode($data, JSON_THROW_ON_ERROR);
             } catch (\JsonException $e) {
@@ -136,7 +141,11 @@ final class RequestPreparer
 
         if ($boundary === null) {
             $boundary = '----PHPImpersonateFormBoundary' . bin2hex(random_bytes(16));
-            self::setHeader($headers, 'Content-Type', rtrim($contentType, "; \t") . '; boundary=' . $boundary);
+            self::setHeader(
+                $headers,
+                'Content-Type',
+                rtrim(self::withoutBoundary($contentType), "; \t") . '; boundary=' . $boundary
+            );
         }
 
         $body = '';
@@ -217,6 +226,40 @@ final class RequestPreparer
     private static function escapeFieldName(string $name): string
     {
         return str_replace(["\0", "\r", "\n", '"'], ['%00', '%0D', '%0A', '%22'], $name);
+    }
+
+    /**
+     * Strip any boundary parameter from a Content-Type.
+     *
+     * Only reached when a declared boundary was unusable — `boundary=""`, which
+     * {@see boundaryFrom()} reports as absent. Appending the generated one
+     * without removing that left a header carrying TWO boundary parameters
+     * (`multipart/form-data; boundary=""; boundary=----PHPImpersonate…`): the
+     * body used the generated delimiter, while a server honouring the first
+     * parameter — or rejecting the duplicate outright, per RFC 2045 — read the
+     * form as empty. rtrim() cannot remove it; the header does not end in one of
+     * its trim characters.
+     */
+    private static function withoutBoundary(string $contentType): string
+    {
+        return preg_replace('/;\s*boundary\s*=\s*(?:"[^"]*"|[^;]*)/i', '', $contentType) ?? $contentType;
+    }
+
+    /**
+     * Render one header as the line libcurl expects.
+     *
+     * An empty value needs the `Name;` form. Handed `Name:` with nothing after
+     * the colon, libcurl REMOVES that header rather than sending it empty — so
+     * a caller passing '' (an unset env var reaching an API key, say) not only
+     * failed to send their own header, they could delete one of the browser
+     * profile's: `['Accept-Language' => '']` stripped that line straight out of
+     * the emitted fingerprint, since {@see \Raza\PHPImpersonate\Process\CurlProcess::collectHeaderLines()}
+     * substitutes a caller header into the profile's slot. `Name;` is libcurl's
+     * documented spelling for a header that is genuinely empty.
+     */
+    public static function headerLine(string $name, string $value): string
+    {
+        return $value === '' ? "$name;" : "$name: $value";
     }
 
     /**

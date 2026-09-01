@@ -5,11 +5,35 @@ namespace Raza\PHPImpersonate\Browser;
 class BrowserConfig
 {
     /**
+     * Memoised result of {@see buildAllConfigs()}.
+     *
+     * @var array<string, array<string,mixed>>|null
+     */
+    private static ?array $configs = null;
+
+    /**
      * Get all available browser configurations
+     *
+     * Built once per process. The literal below is ~1200 lines — 39 profiles,
+     * each with a cipher string plus a dozen headers and a dozen options — and
+     * every one of getConfig(), hasConfig() and getAvailableBrowsers() used to
+     * rebuild the whole thing, allocating a thousand-odd array elements and
+     * their strings. Since the static helpers construct a client per call, an
+     * ordinary `PHPImpersonate::get()` paid that at least once and the process
+     * engine twice, which is squarely at odds with the class's aim that a
+     * throwaway call be as fast as a retained client.
      *
      * @return array<string, array<string,mixed>>
      */
     public static function getAllConfigs(): array
+    {
+        return self::$configs ??= self::buildAllConfigs();
+    }
+
+    /**
+     * @return array<string, array<string,mixed>>
+     */
+    private static function buildAllConfigs(): array
     {
         return [
             'chrome99' => [
@@ -1240,7 +1264,7 @@ class BrowserConfig
         $configs = self::getAllConfigs();
 
         if (! isset($configs[$browserName])) {
-            throw new \InvalidArgumentException("Browser configuration not found: {$browserName}");
+            throw new \Raza\PHPImpersonate\Exception\InvalidArgumentException("Browser configuration not found: {$browserName}");
         }
 
         return $configs[$browserName];

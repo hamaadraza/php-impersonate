@@ -1,22 +1,28 @@
 name: Tests
 
+# The path filter must cover every input the suite actually depends on.
+# tests/fixtures/** was missing, so a commit changing ONLY the fingerprint
+# baseline — the one file whose changes most need checking, and the suite's only
+# record of what goes on the wire — triggered no run at all. docker-compose.yml
+# (which `composer test-server-up` uses) and the scripts were missing too.
+#
+# `push` is restricted to main: with pull_request also enabled, every push to a
+# PR branch ran the entire matrix twice, QEMU legs included.
 on:
   push:
-    paths:
+    branches: [main]
+    paths: &test-paths
       - '**.php'
       - '.github/workflows/run-tests.yml'
       - 'phpunit.xml.dist'
       - 'phpstan.neon.dist'
       - 'composer.json'
+      - 'docker-compose.yml'
       - 'bin/**'
+      - 'tests/fixtures/**'
+      - 'scripts/**'
   pull_request:
-    paths:
-      - '**.php'
-      - '.github/workflows/run-tests.yml'
-      - 'phpunit.xml.dist'
-      - 'phpstan.neon.dist'
-      - 'composer.json'
-      - 'bin/**'
+    paths: *test-paths
 
 jobs:
   # ===========================================
@@ -73,6 +79,13 @@ jobs:
           php-version: '8.3'
           coverage: none
 
+      - name: Cache Composer packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.composer/cache/files
+          key: composer-${{ runner.os }}-${{ matrix.php || '8.3' }}-${{ hashFiles('composer.json') }}
+          restore-keys: |
+            composer-${{ runner.os }}-${{ matrix.php || '8.3' }}-
       - name: Install dependencies
         run: composer install --prefer-dist --no-interaction
 
@@ -98,6 +111,10 @@ jobs:
             name: 'Linux x86_64 (PHP 8.3)'
           - os: ubuntu-latest
             php: '8.4'
+          # composer.json allows ^8, so the top of that range must be tested
+          # too — 8.5 is what new environments now provision.
+          - os: ubuntu-latest
+            php: '8.5'
             name: 'Linux x86_64 (PHP 8.4)'
             
           # Windows x86_64
@@ -128,6 +145,13 @@ jobs:
           echo "::add-matcher::${{ runner.tool_cache }}/php.json"
           echo "::add-matcher::${{ runner.tool_cache }}/phpunit.json"
 
+      - name: Cache Composer packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.composer/cache/files
+          key: composer-${{ runner.os }}-${{ matrix.php || '8.3' }}-${{ hashFiles('composer.json') }}
+          restore-keys: |
+            composer-${{ runner.os }}-${{ matrix.php || '8.3' }}-
       - name: Install dependencies
         run: composer install --prefer-dist --no-interaction
 
@@ -151,7 +175,7 @@ jobs:
       - name: Start local httpbin (Linux)
         if: runner.os == 'Linux'
         run: |
-          docker run -d --name httpbin -p 8080:80 kennethreitz/httpbin
+          docker run -d --name httpbin -p 8080:80 mccutchen/go-httpbin:v2.15.0
           for i in $(seq 1 30); do curl -sf http://localhost:8080/status/200 >/dev/null && break || sleep 1; done
           echo "HTTPBIN_URL=http://localhost:8080" >> "$GITHUB_ENV"
 
@@ -196,7 +220,7 @@ jobs:
           # Local httpbin on a shared network so the containerised tests reach it
           # by hostname instead of depending on public services.
           docker network create testnet
-          docker run -d --name httpbin --network testnet kennethreitz/httpbin
+          docker run -d --name httpbin --network testnet mccutchen/go-httpbin:v2.15.0
           for i in $(seq 1 30); do docker run --rm --network testnet curlimages/curl -sf http://httpbin:80/status/200 >/dev/null 2>&1 && break || sleep 1; done
           docker run --rm --platform ${{ matrix.platform }} \
             --network testnet \
@@ -266,6 +290,13 @@ jobs:
           extensions: dom, curl, libxml, mbstring, zip, pcntl, bcmath, soap, intl, fileinfo
           coverage: none
 
+      - name: Cache Composer packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.composer/cache/files
+          key: composer-${{ runner.os }}-${{ matrix.php || '8.3' }}-${{ hashFiles('composer.json') }}
+          restore-keys: |
+            composer-${{ runner.os }}-${{ matrix.php || '8.3' }}-
       - name: Install dependencies
         run: composer update --${{ matrix.stability }} --prefer-dist --no-interaction
 
@@ -274,7 +305,7 @@ jobs:
 
       - name: Start local httpbin
         run: |
-          docker run -d --name httpbin -p 8080:80 kennethreitz/httpbin
+          docker run -d --name httpbin -p 8080:80 mccutchen/go-httpbin:v2.15.0
           for i in $(seq 1 30); do curl -sf http://localhost:8080/status/200 >/dev/null && break || sleep 1; done
           echo "HTTPBIN_URL=http://localhost:8080" >> "$GITHUB_ENV"
 

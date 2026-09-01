@@ -26,10 +26,25 @@ class ConfigurationTest extends TestCase
     protected function tearDown(): void
     {
         // Static state: restore it, or the ordering of the rest of the suite
-        // starts to matter.
-        if ($this->original !== null) {
-            Configuration::setPlatformConfig(PlatformDetector::getPlatform(), $this->original);
-        }
+        // starts to matter. setPlatformConfig() cannot do this — it merges, so
+        // it overwrites keys but never removes them, leaving behind both the
+        // 'extra-key' added below and a whole 'plan9' platform.
+        Configuration::reset();
+    }
+
+    public function testResetRemovesKeysAndPlatformsAnOverrideAdded(): void
+    {
+        $platform = PlatformDetector::getPlatform();
+
+        Configuration::setPlatformConfig($platform, ['extra-key' => 'extra-value']);
+        Configuration::setPlatformConfig('plan9', ['which_command' => 'lookup']);
+
+        $this->assertSame('extra-value', Configuration::get('extra-key'));
+
+        Configuration::reset();
+
+        $this->assertNull(Configuration::get('extra-key'), 'reset() must remove added keys');
+        $this->assertSame($this->original, Configuration::getPlatformConfig());
     }
 
     public function testCurrentPlatformHasAWhichCommand(): void

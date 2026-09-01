@@ -60,7 +60,7 @@ try {
         if ($doExe) {
             fwrite(STDOUT, sprintf("  %-20s <- %s\n", $dir, $installer->assetName($version, $spec)));
         }
-        if ($doLibs) {
+        if ($doLibs && $installer->libIsUsable($dir)) {
             fwrite(STDOUT, sprintf("  %-20s <- %s (lib)\n", $dir, $installer->libAssetName($version, $spec)));
         }
     }
@@ -72,22 +72,54 @@ try {
 
     fwrite(STDOUT, "\n");
     $results = [];
+    $digests = [];
+
+    // Re-pinning is the point of an intentional upgrade, so an explicit
+    // --version disarms the manifest check; otherwise a mismatch is a corrupt
+    // or tampered download and must stop the run.
+    $manifest = $options['version'] === null ? $installer->readChecksums() : [];
+
     foreach ($platforms as $dir => $spec) {
         if ($doExe) {
             fwrite(STDOUT, "Installing $dir ... ");
-            $results[$dir] = $installer->install($version, $dir, $spec);
+            $results[$dir] = $installer->install($version, $dir, $spec, $manifest);
+            $digests[$results[$dir]['path']] = $results[$dir]['sha256'];
             fwrite(STDOUT, $results[$dir]['message'] . "\n");
         }
-        if ($doLibs) {
+        if ($doLibs && ! $installer->libIsUsable($dir)) {
+            fwrite(STDOUT, sprintf("Skipping %s library: the FFI engine is POSIX-only, nothing can load it.\n", $dir));
+        } elseif ($doLibs) {
             fwrite(STDOUT, "Installing $dir library ... ");
-            $lib = $installer->installLib($version, $dir, $spec);
+            $lib = $installer->installLib($version, $dir, $spec, $manifest);
+            $digests[$lib['path']] = $lib['sha256'];
             fwrite(STDOUT, $lib['message'] . "\n");
         }
     }
 
-    $installer->writeVersionFile($version);
+    $installer->writeChecksums($digests, $version);
 
-    fwrite(STDOUT, "\n✓ Done. Bundled binaries now at $version (recorded in bin/VERSION).\n");
+    // bin/VERSION describes what the EXECUTABLES are, and it is read as such:
+    // bin/php-impersonate-install uses it as the default version to fetch, and
+    // update-fingerprint-baseline.php records it in the committed fixture. A
+    // partial run has not made that true of every platform, and stamping it
+    // anyway published a version no bundled binary was actually at — so only a
+    // complete run over every platform may write it.
+    $complete = $doExe && $options['only'] === null;
+
+    if ($complete) {
+        $installer->writeVersionFile($version);
+        fwrite(STDOUT, "\n✓ Done. Bundled binaries now at $version (recorded in bin/VERSION).\n");
+    } else {
+        $why = ! $doExe ? '--libs-only installed no executables' : '--only installed a subset';
+        fwrite(STDOUT, sprintf(
+            "\n✓ Done. bin/VERSION left at %s: %s, so it would not describe the whole bundle.\n"
+            . "  Run without --only/--libs-only to refresh every platform and stamp the version.\n",
+            trim(@file_get_contents($binDir . '/VERSION') ?: 'unset'),
+            $why
+        ));
+    }
+
+    fwrite(STDOUT, "Digests recorded in bin/CHECKSUMS.\n");
     $unverified = array_filter($results, fn ($r) => ! $r['verified']);
     if ($unverified !== []) {
         fwrite(STDOUT, "\nNote: these could not be executed on this host — verify on their target OS:\n");

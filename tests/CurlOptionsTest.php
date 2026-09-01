@@ -159,10 +159,21 @@ class CurlOptionsTest extends TestCase
 
     public function testNormalizeDropsNullAndEmptyStrings(): void
     {
-        // An empty proxy/cacert is "unset", and must not suppress the default CA
+        // An empty cacert is "unset", and must not suppress the default CA
         // bundle or emit an empty argument.
-        $this->assertSame([], CurlOptions::normalize(['proxy' => '', 'cacert' => null]));
+        $this->assertSame([], CurlOptions::normalize(['cacert' => null, 'capath' => '']));
         $this->assertSame(['proxy' => 'http://p:1'], CurlOptions::normalize(['proxy' => 'http://p:1']));
+    }
+
+    public function testNormalizeKeepsAnEmptyProxyBecauseCurlGivesItMeaning(): void
+    {
+        // curl documents `--proxy ""` / CURLOPT_PROXY set to "" as the way to
+        // disable proxying, overriding http_proxy/HTTPS_PROXY. Dropped with the
+        // other empty strings, a caller had no way to say "go direct" — and was
+        // never told the value had been ignored.
+        $this->assertSame(['proxy' => ''], CurlOptions::normalize(['proxy' => '']));
+        $this->assertTrue(CurlOptions::emptyIsMeaningful('proxy'));
+        $this->assertFalse(CurlOptions::emptyIsMeaningful('cacert'));
     }
 
     public function testNormalizeIsIdempotent(): void

@@ -143,9 +143,27 @@ class FingerprintBaselineTest extends TestCase
      */
     private function observe(string $browser): array
     {
+        // These two cross-checks only MEAN anything under the FFI engine.
+        //
+        // The claim they make is that BrowserConfig has not drifted from the
+        // shared library's own built-in profile — which holds only when the
+        // library is what drove the wire. The process engine drives it FROM the
+        // very BrowserConfig values being asserted, so under that engine the
+        // comparison is a value against itself and passes by construction. On
+        // the Windows CI leg, where FFI is unavailable by design, AUTO resolves
+        // to the process engine and both tests went quietly tautological.
+        if (! PHPImpersonate::ffiAvailable()) {
+            $this->markTestSkipped(
+                'These compare BrowserConfig against what the shared library put on the wire, '
+                . 'which is only a real comparison under the FFI engine. The process engine '
+                . 'drives the ClientHello from BrowserConfig itself, so the assertion would '
+                . 'compare a value with itself and pass regardless.'
+            );
+        }
+
         // Cached across data sets: three assertions per browser would otherwise
         // be three requests to a public service that rate-limits.
-        return self::$observed[$browser] ??= (new PHPImpersonate($browser, 30))
+        return self::$observed[$browser] ??= (new PHPImpersonate($browser, 30, [], PHPImpersonate::ENGINE_FFI))
             ->sendGet(TestServer::tls())
             ->json();
     }

@@ -2,7 +2,7 @@
 
 namespace Raza\PHPImpersonate\Platform;
 
-use InvalidArgumentException;
+use Raza\PHPImpersonate\Exception\InvalidArgumentException;
 
 /**
  * Builds commands as argv arrays for proc_open()'s array mode.

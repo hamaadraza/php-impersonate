@@ -2,6 +2,8 @@
 
 namespace Raza\PHPImpersonate;
 
+use Raza\PHPImpersonate\Exception\InvalidArgumentException;
+
 class Request
 {
     private string $method;
@@ -11,6 +13,8 @@ class Request
      * @param string $url The URL to request
      * @param array<string,string> $headers Request headers
      * @param string|null $body Request body content
+     * @throws InvalidArgumentException If the method is empty or contains
+     *                                  anything but token characters.
      */
     public function __construct(
         string $method,
@@ -18,6 +22,20 @@ class Request
         private array $headers = [],
         private ?string $body = null
     ) {
+        // The verb is the third thing that reaches the wire verbatim, alongside
+        // the URL and the headers — both of which are already guarded against
+        // control characters. It was not, and the bundled curl does not reject
+        // them either: a method of "GET\r\nX-Injected: evil" split the request
+        // line in two. Restrict it to an RFC 9110 §5.6.2 token, which is all a
+        // method may be, rather than only excluding CR/LF/NUL.
+        if ($method === '' || preg_match('/[^!#$%&\'*+.^_`|~0-9A-Za-z-]/', $method)) {
+            throw new InvalidArgumentException(sprintf(
+                'Invalid HTTP method "%s": a method must be a non-empty RFC 9110 token '
+                . '(letters, digits, and any of !#$%%&\'*+-.^_`|~).',
+                $method
+            ));
+        }
+
         // Normalise here, at the one boundary every request passes through, so
         // no engine has to remember to. The FFI engine already uppercased before
         // CURLOPT_CUSTOMREQUEST while the executable engine passed -X through

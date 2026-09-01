@@ -34,8 +34,9 @@ Parses the authoritative `impersonate_opts` table in upstream
 - `src/Browser/BrowserConfig.php` — the full config (ciphers, curves,
   signature-hashes, headers, HTTP/2 + TLS options).
 - `src/Browser/BrowserName.php` — a `CONST` and a `getAll()` entry.
-- The `@phpstan-type BrowserName` unions in `BrowserName.php`,
-  `PHPImpersonate.php`, and `PHPImpersonateFactory.php`.
+- The `@phpstan-type BrowserName` unions in `PHPImpersonate.php` and
+  `PHPImpersonateFactory.php` — the two files in `SourceEditor::UNION_FILES`.
+  `BrowserName.php` is not among them: it carries the constants, not a union.
 
 It is **append-only and idempotent**: existing, validated configs are never
 modified, and re-running when nothing is new is a no-op.

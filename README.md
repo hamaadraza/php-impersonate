@@ -175,14 +175,14 @@ platform (bundled for [common platforms](#supported-platforms);
 Prebuilt binaries **and** FFI libraries ship inside the package for the most
 common platforms, so everything works with no extra steps:
 
-| Platform | Bundled |
-|---|:---:|
-| Linux x86_64 (glibc) | ✅ |
-| macOS ARM64 (Apple Silicon) | ✅ |
-| Windows x86_64 | ✅ |
-| Linux x86_64 (musl / Alpine) | on demand |
-| Linux ARM64 (glibc & musl) | on demand |
-| macOS x86_64 (Intel) | on demand |
+| Platform | Executable | FFI library |
+|---|:---:|:---:|
+| Linux x86_64 (glibc) | bundled | bundled |
+| Linux x86_64 (musl / Alpine) | bundled | bundled |
+| macOS ARM64 (Apple Silicon) | bundled | bundled |
+| Windows x86_64 | bundled | n/a — FFI is POSIX-only |
+| Linux ARM64 (glibc & musl) | on demand | on demand |
+| macOS x86_64 (Intel) | on demand | on demand |
 
 On an “on demand” platform, run the installer once after `composer require` to
 download the matching binary and library:
@@ -431,12 +431,21 @@ $client = new PHPImpersonate('chrome146', 10);       // 10-second default for th
 
 ## Error handling
 
-Transport failures (DNS, connection, timeout, a non-loadable library, etc.)
-throw `RequestException`. HTTP error statuses do **not** throw — check
-`isSuccess()`:
+The library raises two kinds of error:
+
+- **`RequestException`** — a transport failure: DNS, connection, timeout, a
+  broken transfer, a non-loadable library.
+- **`InvalidArgumentException`** — a caller mistake: an unusable URL, a timeout
+  outside 1–3600, an unknown browser or engine, an unsupported curl option, data
+  that cannot be encoded as a body.
+
+HTTP error statuses do **not** throw — check `isSuccess()`.
+
+Both implement **`PHPImpersonateException`**, so one catch covers everything the
+library can raise. Reach for that unless you want to tell the two apart:
 
 ```php
-use Raza\PHPImpersonate\Exception\RequestException;
+use Raza\PHPImpersonate\Exception\PHPImpersonateException;
 
 try {
     $response = PHPImpersonate::get('https://example.com/maybe', [], 5);
@@ -444,8 +453,25 @@ try {
     if (! $response->isSuccess()) {
         echo "HTTP {$response->status()}\n";
     }
-} catch (RequestException $e) {
+} catch (PHPImpersonateException $e) {
     echo "Request failed: {$e->getMessage()}";
+}
+```
+
+Catching `RequestException` alone is **not** enough to be safe against bad
+input: `InvalidArgumentException` extends `LogicException`, so the two share no
+built-in parent, and `PHPImpersonate::get('not a url')` would escape it.
+
+```php
+use Raza\PHPImpersonate\Exception\RequestException;
+use Raza\PHPImpersonate\Exception\InvalidArgumentException;
+
+try {
+    $response = PHPImpersonate::get($url);
+} catch (InvalidArgumentException $e) {
+    // the request was never sent — fix the arguments
+} catch (RequestException $e) {
+    // it went out and failed — worth retrying
 }
 ```
 

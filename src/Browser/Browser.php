@@ -223,6 +223,15 @@ class Browser implements BrowserInterface
             return self::$verifiedBinaries[$path];
         }
 
+        // Since PHP 8.0 a name in disable_functions behaves as undefined and
+        // throws an Error, which `@` cannot suppress — so ask first. A host that
+        // has disabled it cannot run the executable engine anyway; report the
+        // binary as unusable and let the caller fall back or say so plainly,
+        // rather than dying with "call to undefined function".
+        if (! function_exists('shell_exec')) {
+            return self::$verifiedBinaries[$path] = false;
+        }
+
         $errorRedirect = $platform === PlatformDetector::PLATFORM_WINDOWS ? '2>nul' : '2>/dev/null';
         $versionCommand = escapeshellarg($path) . ' --version ' . $errorRedirect;
 
@@ -237,6 +246,12 @@ class Browser implements BrowserInterface
      */
     private function findInPath(string $command, string $platform): ?string
     {
+        // See isCurlImpersonate(): a disabled shell_exec throws rather than
+        // returning false, and `@` does not stop it.
+        if (! function_exists('shell_exec')) {
+            return null;
+        }
+
         $default = $platform === PlatformDetector::PLATFORM_WINDOWS ? 'where' : 'which';
         $configured = Configuration::get('which_command');
 

@@ -23,6 +23,12 @@ final class CurlProcess
     private const PROCESS_TIMEOUT_BUFFER = 5;
 
     /**
+     * How long the output loop waits per iteration, in microseconds — long
+     * enough not to spin, short enough that the timeout check stays responsive.
+     */
+    private const POLL_INTERVAL_US = 200000;
+
+    /**
      * curl's exit code for CURLE_TOO_MANY_REDIRECTS, the one failure that still
      * yields a usable response: the final reply was received in full, only the
      * chain was cut short. The FFI engine returns it rather than throwing
@@ -90,28 +96,23 @@ final class CurlProcess
             // header block instead, so don't present it as a body.
             $isHead = strtoupper($method) === 'HEAD';
 
-            // On Windows with .bat files, the output might not be written to files
-            // properly, so we may need to recover the response from command stdout.
             $responseBody = $isHead ? '' : $this->readTempFile($tempFiles['body']);
-            $extractedStatus = null;
-
-            // stdout only (never stderr — warnings there must not become a body).
-            // Strict '' check: a body of exactly "0" is falsy but is a real body.
-            if (! $isHead && $responseBody === '' && ! empty($result['stdout'])) {
-                $extracted = $this->captureResponseFromOutput($result['stdout']);
-                $responseBody = $extracted['body'];
-                $extractedStatus = $extracted['status'];
-            }
-
             $rawHeaders = $this->readTempFile($tempFiles['headers']);
 
-            // If we still don't have a proper status code, try the headers.
-            // captureResponseFromOutput() reports an unknown status as the string '0'.
-            if ($extractedStatus === '0') {
-                $extractedStatus = $this->extractStatusFromHeaders($rawHeaders);
-            }
+            // The write-out is authoritative: `-w '%{http_code}'` is the status
+            // curl itself reports, and -o/-D always capture, so there is nothing
+            // to reconstruct. (A stdout-scraping fallback used to sit here for
+            // Windows .bat wrappers, which proc_open's array mode cannot launch
+            // at all — it only ever ran on ordinary empty-body responses, where
+            // it risked reading a body's trailing numeric line as the status.)
+            // Falling back to the header block covers the one real gap: a
+            // write-out that never arrived.
+            $statusCode = (int) $result['status_code'];
 
-            $statusCode = $extractedStatus !== null ? (int) $extractedStatus : (int) $result['status_code'];
+            if ($statusCode < 100 || $statusCode >= 600) {
+                $fromHeaders = $this->extractStatusFromHeaders($rawHeaders);
+                $statusCode = $fromHeaders !== null ? (int) $fromHeaders : $statusCode;
+            }
 
             return ['status' => $statusCode, 'headers' => $rawHeaders, 'body' => $responseBody];
         } finally {
@@ -176,47 +177,6 @@ final class CurlProcess
         $content = file_get_contents($filePath);
 
         return $content !== false ? $content : '';
-    }
-
-    /**
-     * Recover response body + status from stdout for the case where .bat files on
-     * Windows don't redirect output to files properly.
-     *
-     * @param array<int,string> $output
-     * @return array{body: string, status: string}
-     */
-    private function captureResponseFromOutput(array $output): array
-    {
-        if (empty($output)) {
-            return ['body' => '', 'status' => '0'];
-        }
-
-        $fullOutput = implode("\n", $output);
-
-        // Remove any trailing temp file paths that curl may append on Windows.
-        $fullOutput = preg_replace('/\S+\\\\.*\.tmp$/', '', $fullOutput);
-        $fullOutput = trim($fullOutput);
-
-        // The response is everything except a trailing numeric status-code line.
-        $lines = explode("\n", $fullOutput);
-        $statusCode = '0';
-
-        if (count($lines) > 1) {
-            $lastLine = trim(end($lines));
-            if (is_numeric($lastLine) && strlen($lastLine) <= 3) {
-                $statusCode = $lastLine;
-                array_pop($lines);
-                $fullOutput = implode("\n", $lines);
-            }
-        } elseif (count($lines) === 1) {
-            $singleLine = trim($lines[0]);
-            if (is_numeric($singleLine) && strlen($singleLine) <= 3) {
-                $statusCode = $singleLine;
-                $fullOutput = ''; // a lone status code means a HEAD-style empty body
-            }
-        }
-
-        return ['body' => $fullOutput, 'status' => $statusCode];
     }
 
     /**
@@ -301,9 +261,14 @@ final class CurlProcess
         $tempFiles = [];
 
         try {
-            if ($body !== null) {
+            // A HEAD carries no body. curl rejects `--head` alongside
+            // `--data-binary` while still parsing arguments (exit 2, before any
+            // network I/O), whereas the FFI engine returns ahead of its own body
+            // branch and simply drops it — so the same call threw on one engine
+            // and succeeded on the other. Drop it here too, and let them agree.
+            if ($body !== null && strtoupper($method) !== 'HEAD') {
                 $tempFiles = array_merge($tempFiles, $this->addBodyToOptions($options, $body));
-            } elseif (strtoupper($method) === 'POST') {
+            } elseif ($body === null && strtoupper($method) === 'POST') {
                 // A bodyless POST still has to reach curl as a POST, and with -X
                 // withheld (see buildCurlOptions()) an empty --data-binary is what
                 // says so without pinning the verb across redirects.
@@ -323,14 +288,23 @@ final class CurlProcess
 
             // Credential-bearing options go to a curl config file for the same
             // reason: --proxy-user on the command line is world-readable.
-            if ($credentials !== []) {
-                $file = $this->writeLinesToTempFile('curl_impersonate_config', self::configLines($credentials), 'curl configuration');
-                $tempFiles[] = $file;
-                $options['config'] = $file;
-            }
+            //
+            // The URL rides along in that file, and for the same reason: it can
+            // carry `user:password@` userinfo or a token in its query string,
+            // and as a positional argument it sat in /proc/<pid>/cmdline for
+            // any local user to read for the life of the request — the very
+            // exposure the headers and proxy options are routed away from.
+            $configLines = self::configLines($credentials);
+            $configLines[] = sprintf('url = "%s"', self::escapeConfigValue($url, 'URL'));
 
-            // argv array for proc_open array mode: executed directly, no shell involved.
-            $command = CommandBuilder::buildCurlCommandArgs($browserCmd, [$url], $options);
+            $file = $this->writeLinesToTempFile('curl_impersonate_config', $configLines, 'curl configuration');
+            $tempFiles[] = $file;
+            $options['config'] = $file;
+
+            // argv array for proc_open array mode: executed directly, no shell
+            // involved. No positional argument: the URL comes from the config
+            // file above.
+            $command = CommandBuilder::buildCurlCommandArgs($browserCmd, [], $options);
 
             return ['command' => $command, 'tempFiles' => $tempFiles];
         } catch (\Exception $e) {
@@ -372,7 +346,10 @@ final class CurlProcess
         $pending = [];
         foreach ($callerHeaders as $name => $value) {
             RequestPreparer::assertHeaderIsSafe((string) $name, (string) $value);
-            $pending[] = ['name' => strtolower((string) $name), 'line' => "$name: $value"];
+            $pending[] = [
+                'name' => strtolower((string) $name),
+                'line' => RequestPreparer::headerLine((string) $name, (string) $value),
+            ];
         }
 
         $lines = [];
@@ -390,7 +367,7 @@ final class CurlProcess
             }
 
             RequestPreparer::assertHeaderIsSafe((string) $name, (string) $value);
-            $lines[] = "$name: $value";
+            $lines[] = RequestPreparer::headerLine((string) $name, (string) $value);
         }
 
         foreach ($pending as $header) {
@@ -443,25 +420,38 @@ final class CurlProcess
         $lines = [];
 
         foreach ($options as $name => $value) {
-            $value = (string) $value;
-
-            // Escaping quotes is not enough on its own: the config format is
-            // line-oriented, so a raw newline ends this option and curl parses
-            // the remainder of the value as another one. CurlOptions::assertAllowed()
-            // rejects these already; re-checked at the sink because this class
-            // is constructible directly and only normalize() runs on that path.
-            if (preg_match('/[\r\n\0]/', $value)) {
-                throw new RequestException(sprintf(
-                    'Invalid value for curl option "%s": values may not contain CR, LF, or NUL.',
-                    $name
-                ));
-            }
-
-            $escaped = str_replace(['\\', '"'], ['\\\\', '\\"'], $value);
-            $lines[] = sprintf('%s = "%s"', $name, $escaped);
+            $lines[] = sprintf(
+                '%s = "%s"',
+                $name,
+                self::escapeConfigValue((string) $value, sprintf('value for curl option "%s"', $name))
+            );
         }
 
         return $lines;
+    }
+
+    /**
+     * Escape one value for curl's double-quoted config-file syntax.
+     *
+     * @param string $what Human label for the error message.
+     * @throws RequestException If the value contains a config-file line break.
+     */
+    private static function escapeConfigValue(string $value, string $what): string
+    {
+        // Escaping quotes is not enough on its own: the config format is
+        // line-oriented, so a raw newline ends this option and curl parses the
+        // remainder of the value as another one. CurlOptions::assertAllowed()
+        // and RequestPreparer::validateRequest() reject these already;
+        // re-checked at the sink because this class is constructible directly
+        // and only normalize() runs on that path.
+        if (preg_match('/[\r\n\0]/', $value)) {
+            throw new RequestException(sprintf(
+                'Invalid %s: may not contain CR, LF, or NUL.',
+                $what
+            ));
+        }
+
+        return str_replace(['\\', '"'], ['\\\\', '\\"'], $value);
     }
 
     /**
@@ -498,8 +488,21 @@ final class CurlProcess
 
         $options = [
             's' => true, // silent mode
+            // -s alone also silences curl's ERROR messages, which left every
+            // transport failure reported as "exit code 6: 000" — the write-out
+            // digits standing where the cause should be, while the FFI engine
+            // named it via curl_easy_strerror(). -S restores the diagnostic
+            // without restoring the progress meter (already off, below).
+            'S' => true,
             'no-progress-meter' => true,
             'L' => true, // follow redirects
+            // Redirects may only go where the initial URL was allowed to.
+            // RequestPreparer::validateRequest() allow-lists http/https, but
+            // curl's own redirect default also permits ftp/ftps — so a server
+            // could answer `Location: ftp://internal-host/` and reach a scheme
+            // this client explicitly refuses to speak. Mirrors the FFI engine's
+            // CURLOPT_REDIR_PROTOCOLS.
+            'proto-redir' => '=http,https',
             'w' => '%{http_code}', // write out format
             'max-time' => $this->timeout,
             'o' => $outputFile, // output file
@@ -684,10 +687,18 @@ final class CurlProcess
 
             // Block until output is available (or 200ms passes so the timeout
             // check above still runs) instead of busy-polling.
+            //
+            // stream_select() FAILS on proc_open() pipes under Windows — they
+            // are anonymous pipes, not sockets — returning false immediately.
+            // With the reads already non-blocking, that turned this loop into a
+            // zero-delay spin that pinned a core for the whole request. Sleep
+            // for the same interval by hand whenever select cannot do it.
             $read = [$pipes[1], $pipes[2]];
             $write = null;
             $except = null;
-            @stream_select($read, $write, $except, 0, 200000);
+            if (@stream_select($read, $write, $except, 0, self::POLL_INTERVAL_US) === false) {
+                usleep(self::POLL_INTERVAL_US);
+            }
 
             $stdout = stream_get_contents($pipes[1]);
             $stderr = stream_get_contents($pipes[2]);

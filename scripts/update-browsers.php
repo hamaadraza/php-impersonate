@@ -6,7 +6,7 @@
  * Parses the authoritative `impersonate_opts` table in the upstream
  * `patches/curl.patch`, then adds any target NOT already present to this
  * package — BrowserConfig, the BrowserName constants + getAll(), and the
- * three @phpstan-type BrowserName docblocks. Existing, already-validated
+ * two @phpstan-type BrowserName docblocks. Existing, already-validated
  * configs are never modified (append-only), so re-running is safe/idempotent.
  *
  * Usage:
@@ -14,7 +14,12 @@
  *
  * Options:
  *   --dry-run       Report what would change; write nothing.
- *   --ref=REF       Git ref/branch/tag of curl-impersonate to read (default: main).
+ *   --ref=REF       Git ref/branch/tag of curl-impersonate to read. Defaults to
+ *                   the tag in bin/VERSION — the release the bundled binaries
+ *                   were built from — so a generated config is always backed by
+ *                   a binary that supports it. Pass --ref=main to look ahead at
+ *                   unreleased targets (they will NOT work until the next
+ *                   binary update).
  *   --patch-file=P  Read the patch from a local file instead of downloading.
  *
  * Exit codes: 0 = success (0 or more added), 1 = error.
@@ -92,11 +97,29 @@ try {
 }
 
 /**
+ * The upstream ref the bundled binaries came from, per bin/VERSION.
+ */
+function bundledRef(): string
+{
+    $file = dirname(__DIR__) . '/bin/VERSION';
+    $version = is_file($file) ? trim((string) file_get_contents($file)) : '';
+
+    return $version !== '' ? $version : 'main';
+}
+
+/**
  * @return array{dry-run: bool, ref: string, patch-file: ?string}
  */
 function parseArgs(array $argv): array
 {
-    $opts = ['dry-run' => false, 'ref' => 'main', 'patch-file' => null];
+    // Defaulting to `main` let this append targets that exist only upstream:
+    // update-binaries.php installs a RELEASE tag, so a target merged to main
+    // but not yet released produced a BrowserConfig entry, a BrowserName
+    // constant and a phpstan union member that every engine then rejected at
+    // runtime. update-impersonate.php promises 'binaries first so new configs
+    // are backed by a capable binary'; pinning the same tag is what makes that
+    // promise true.
+    $opts = ['dry-run' => false, 'ref' => bundledRef(), 'patch-file' => null];
     foreach (array_slice($argv, 1) as $arg) {
         if ($arg === '--dry-run') {
             $opts['dry-run'] = true;

@@ -56,6 +56,32 @@ final class TestServer
         self::require($test, self::tls(), 'the TLS-fingerprint service', 'TLS_FINGERPRINT_URL');
     }
 
+    /**
+     * Whether an unavailable service must FAIL the run rather than skip it.
+     *
+     * Skipping is right for a contributor with no network. It is wrong for the
+     * run that guards releases: the fingerprint suites — the only tests that
+     * observe what actually goes on the wire — gate on a public service that
+     * rate-limits, so one 429 marked every one of them skipped and the run went
+     * green having verified nothing. Set REQUIRE_LIVE_SERVICES=1 wherever that
+     * silence would be mistaken for a pass.
+     */
+    private static function mustHaveLiveServices(): bool
+    {
+        $flag = getenv('REQUIRE_LIVE_SERVICES');
+
+        return is_string($flag) && filter_var($flag, FILTER_VALIDATE_BOOL);
+    }
+
+    private static function unavailable(TestCase $test, string $message): void
+    {
+        if (self::mustHaveLiveServices()) {
+            $test->fail($message . ' (REQUIRE_LIVE_SERVICES=1, so this is a failure rather than a skip.)');
+        }
+
+        $test->markTestSkipped($message);
+    }
+
     private static function require(TestCase $test, string $url, string $name, string $envVar): void
     {
         if (! array_key_exists($url, self::$probed)) {
@@ -65,7 +91,7 @@ final class TestServer
         $status = self::$probed[$url];
 
         if ($status === null) {
-            $test->markTestSkipped(sprintf(
+            self::unavailable($test, sprintf(
                 '%s is unreachable at %s. Start a local instance (see docker-compose.yml) '
                 . 'and set %s, or check your network.',
                 ucfirst($name),
@@ -81,7 +107,7 @@ final class TestServer
         // fingerprint suites assert hard rather than swallowing exceptions, that
         // turned one 429 into a screenful of unrelated failures.
         if ($status < 200 || $status >= 300) {
-            $test->markTestSkipped(sprintf(
+            self::unavailable($test, sprintf(
                 '%s answered HTTP %d at %s, so it cannot serve this test.%s Run a local '
                 . 'instance (see docker-compose.yml) and set %s to stop depending on it.',
                 ucfirst($name),

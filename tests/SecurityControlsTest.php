@@ -3,11 +3,13 @@
 namespace Raza\PHPImpersonate\Tests;
 
 use ReflectionClass;
+use ReflectionMethod;
 use PHPUnit\Framework\TestCase;
 use Raza\PHPImpersonate\Browser\Browser;
 use Raza\PHPImpersonate\Process\CurlProcess;
 use Raza\PHPImpersonate\Config\Configuration;
 use PHPUnit\Framework\Attributes\DataProvider;
+use Raza\PHPImpersonate\Platform\PlatformDetector;
 
 /**
  * The guards that only matter when something has already gone wrong.
@@ -19,6 +21,12 @@ use PHPUnit\Framework\Attributes\DataProvider;
  */
 class SecurityControlsTest extends TestCase
 {
+    protected function tearDown(): void
+    {
+        // This class overrides Configuration's static per-platform settings.
+        Configuration::reset();
+    }
+
     /**
      * The argv stored on a RequestException, which routinely reaches logs.
      *
@@ -139,17 +147,41 @@ class SecurityControlsTest extends TestCase
         ];
     }
 
-    public function testLegitimateWhichCommandIsAccepted(): void
+    /**
+     * Exercises the REAL guard in Browser::findInPath(), not a copy of its
+     * regex. Asserting against a pattern re-declared in this file only proved a
+     * string literal behaved like itself: the guard could be loosened, tightened
+     * or inverted and every case here would still pass.
+     *
+     * A legitimately configured command must actually be USED — the observable
+     * difference being that findInPath() returns the path such a command
+     * resolves, where a rejected one falls back to the platform default.
+     */
+    public function testLegitimateWhichCommandIsUsedByTheRealGuard(): void
     {
-        // The guard must not reject the values it exists to allow.
-        $pattern = '#^[\w.:/\\\\-]+$#';
-
-        foreach (['which', 'where', '/usr/bin/which', 'C:\\\\Windows\\\\System32\\\\where.exe'] as $safe) {
-            $this->assertSame(1, preg_match($pattern, $safe), "$safe should be accepted");
+        if (PlatformDetector::isWindows()) {
+            $this->markTestSkipped('POSIX which(1) semantics');
         }
 
-        foreach (['which; touch x', 'which $(x)', 'which `x`', 'which | x'] as $unsafe) {
-            $this->assertSame(0, preg_match($pattern, $unsafe), "$unsafe should be refused");
-        }
+        $findInPath = new ReflectionMethod(Browser::class, 'findInPath');
+        $findInPath->setAccessible(true);
+
+        $browser = (new ReflectionClass(Browser::class))->newInstanceWithoutConstructor();
+        $platform = PlatformDetector::getPlatform();
+
+        // An absolute path made of allowed characters passes the guard and is
+        // the command actually run: it resolves `sh` exactly as bare `which` does.
+        Configuration::setPlatformConfig($platform, ['which_command' => '/usr/bin/which']);
+        $viaAbsolute = $findInPath->invoke($browser, 'sh', $platform);
+
+        Configuration::setPlatformConfig($platform, ['which_command' => 'which']);
+        $viaDefault = $findInPath->invoke($browser, 'sh', $platform);
+
+        $this->assertNotNull($viaDefault, 'sanity: bare `which sh` should resolve');
+        $this->assertSame(
+            $viaDefault,
+            $viaAbsolute,
+            'a configured, allow-listed which_command must be honoured, not silently replaced by the default'
+        );
     }
 }

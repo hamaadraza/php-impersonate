@@ -4,7 +4,7 @@ namespace Raza\PHPImpersonate\Exception;
 
 use RuntimeException;
 
-class RequestException extends RuntimeException
+class RequestException extends RuntimeException implements PHPImpersonateException
 {
     /**
      * @param string $message Error message

@@ -16,4 +16,16 @@
 /deploy.sh export-ignore
 /docker-compose.yml export-ignore
 /scripts/test-all-architectures.sh export-ignore
+/scripts/README.md export-ignore
+
+# Maintainer-only tooling. These rewrite files under src/ and tests/, which do
+# not meaningfully exist in a vendored install, and they were shipping while
+# update-fingerprint-baseline.php alone was excluded — an inconsistent split
+# that also left a composer script pointing at a file the dist did not contain.
 /scripts/update-fingerprint-baseline.php export-ignore
+/scripts/update-impersonate.php export-ignore
+/scripts/update-browsers.php export-ignore
+/scripts/update-binaries.php export-ignore
+/scripts/lib/ConfigGenerator.php export-ignore
+/scripts/lib/SourceEditor.php export-ignore
+/scripts/lib/UpstreamPatch.php export-ignore

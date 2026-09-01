@@ -117,20 +117,45 @@ run_test() {
     # Run the test
     local start_time=$(date +%s)
     
+    # The project is mounted READ-ONLY and copied inside the container. Mounted
+    # read-write and run as container root, each leg reinstalled dependencies
+    # into the developer's own vendor/ as uid 0 — leaving it root-owned (EACCES
+    # for every later host-side composer/pest run) and letting four legs of
+    # different arch and libc overwrite one another's tree.
     if docker run --rm --platform "$platform" \
-        -v "$PROJECT_DIR:/app" \
+        -v "$PROJECT_DIR:/src:ro" \
         -w /app \
         "$image" \
         sh -c "
+            set -e
+
             # Install dependencies
             $install_cmd > /dev/null 2>&1
-            
-            # Install composer
-            curl -sS https://getcomposer.org/installer 2>/dev/null | php -- --install-dir=/usr/local/bin --filename=composer > /dev/null 2>&1
-            
+
+            cp -a /src /app 2>/dev/null || { mkdir -p /app && cp -a /src/. /app/; }
+            cd /app
+
+            # Install composer, checking the installer against the published
+            # SHA-384 rather than piping an unverified remote script into php —
+            # the pattern Composer's own documentation warns against, and it ran
+            # here as root with the project mounted.
+            php -r \"copy('https://composer.github.io/installer.sig', '/tmp/composer-setup.sig');\"
+            php -r \"copy('https://getcomposer.org/installer', '/tmp/composer-setup.php');\"
+            php -r \"exit(hash_file('sha384','/tmp/composer-setup.php') === trim(file_get_contents('/tmp/composer-setup.sig')) ? 0 : 1);\" || {
+                echo 'composer installer checksum mismatch - refusing to run it'
+                exit 1
+            }
+            php /tmp/composer-setup.php --install-dir=/usr/local/bin --filename=composer --quiet
+
             # Install PHP dependencies
-            composer install --prefer-dist --no-interaction --quiet 2>/dev/null
-            
+            composer install --prefer-dist --no-interaction --quiet
+
+            # Fetch the curl-impersonate binary for THIS architecture. The repo
+            # bundles only x86_64 (plus macOS arm64), so without this the ARM64
+            # legs exercised none of the impersonation code they exist to cover.
+            php bin/php-impersonate-install --no-libs || \
+                echo 'warning: could not install binaries for this platform'
+
             # Show platform detection
             echo '=== Platform Detection ==='
             php -r \"
@@ -220,16 +245,10 @@ main() {
     echo "Project directory: $PROJECT_DIR"
     echo ""
     
-    # Check Docker is available
-    if ! command -v docker &> /dev/null; then
-        print_error "Docker is not installed or not in PATH"
-        exit 1
-    fi
-    
-    # Setup QEMU for cross-architecture support
-    setup_qemu
-    
-    # Parse arguments
+    # Arguments are parsed FIRST. Handling them after the Docker check and
+    # setup_qemu meant `--help` needed Docker installed, pulled an alpine image
+    # and could run a --privileged container just to print usage — and a typo'd
+    # --filter merely warned, then ran every leg under QEMU emulation.
     local filter=""
     while [[ $# -gt 0 ]]; do
         case $1 in
@@ -253,12 +272,21 @@ main() {
                 exit 0
                 ;;
             *)
-                print_warning "Unknown option: $1"
-                shift
+                print_error "Unknown option: $1 (try --help)"
+                exit 1
                 ;;
         esac
     done
-    
+
+    # Check Docker is available
+    if ! command -v docker &> /dev/null; then
+        print_error "Docker is not installed or not in PATH"
+        exit 1
+    fi
+
+    # Setup QEMU for cross-architecture support
+    setup_qemu
+
     # Run tests
     for test_config in "${TESTS[@]}"; do
         IFS='|' read -r name platform image <<< "$test_config"

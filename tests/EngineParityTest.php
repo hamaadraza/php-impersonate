@@ -37,6 +37,13 @@ class EngineParityTest extends TestCase
             'chrome150' => ['chrome150'],
             'safari184' => ['safari184'],
             'okhttp4_android' => ['okhttp4_android'],
+            // Profiles flagged during review as possibly incoherent. Whether
+            // their DATA is right is an upstream question — BrowserConfig is
+            // generated from upstream's curl.patch — but whether this package
+            // still matches the shared library is testable here, and that is
+            // what would catch a sync going wrong.
+            'safari260_ios (v26 cipher order)' => ['safari260_ios'],
+            'chrome131_android (client hints)' => ['chrome131_android'],
             // Hand-written rather than generated from upstream, so they are the
             // ones most likely to drift out of step with the shared library.
             'firefox133 (hand-written)' => ['firefox133'],
@@ -369,5 +376,63 @@ class EngineParityTest extends TestCase
         $this->assertNotSame('', $ja4, "$browser/$engine: the response carried an empty JA4 fingerprint");
 
         return $ja4;
+    }
+
+    /**
+     * The full header MAP, name and value, for every provider browser.
+     *
+     * Header-order parity compared only lower-cased NAMES, and only for
+     * chrome146; the httpbin checks compared two values, also only for
+     * chrome146. So a drifted value — an Accept-Language, a sec-ch-ua, an
+     * Accept — in any of the other profiles passed the entire suite, even though
+     * the two engines draw their headers from independently maintained sources:
+     * the FFI engine from the shared library's built-in profile
+     * (curl_easy_impersonate), the process engine from this package's own
+     * BrowserConfig arrays. That drift is exactly what the parity suite exists
+     * to catch, and it was the one thing it could not see.
+     */
+    #[DataProvider('browserProvider')]
+    public function testBothEnginesSendIdenticalHeaderValues(string $browser): void
+    {
+        TestServer::requireHttpbin($this);
+
+        $ffi = $this->sentHeaders($browser, PHPImpersonate::ENGINE_FFI);
+        $process = $this->sentHeaders($browser, PHPImpersonate::ENGINE_PROCESS);
+
+        $this->assertNotSame([], $ffi, "$browser: no headers observed via FFI");
+
+        // Hop-by-hop and per-request noise: not part of the fingerprint, and
+        // legitimately different between a reused connection and a fresh process.
+        foreach (['host', 'content-length', 'connection', 'x-amzn-trace-id'] as $volatile) {
+            unset($ffi[$volatile], $process[$volatile]);
+        }
+
+        $this->assertSame(
+            $ffi,
+            $process,
+            "$browser: the two engines sent different headers. The FFI engine applies the shared "
+            . "library's built-in profile; the process engine applies BrowserConfig. A difference "
+            . 'here means those two have drifted apart.'
+        );
+    }
+
+    /**
+     * The headers a request actually carried, lower-cased name => value.
+     *
+     * @return array<string,string>
+     */
+    private function sentHeaders(string $browser, string $engine): array
+    {
+        $body = (new PHPImpersonate($browser, 30, [], $engine))
+            ->sendGet(TestServer::httpbin('/headers'))
+            ->json();
+
+        $out = [];
+        foreach ($body['headers'] ?? [] as $name => $value) {
+            $out[strtolower((string) $name)] = (string) $value;
+        }
+        ksort($out);
+
+        return $out;
     }
 }

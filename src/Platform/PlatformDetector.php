@@ -7,6 +7,7 @@ class PlatformDetector
     public const PLATFORM_LINUX = 'linux';
     public const PLATFORM_WINDOWS = 'windows';
     public const PLATFORM_MACOS = 'macos';
+    public const PLATFORM_UNKNOWN = 'unknown';
 
     public const ARCH_X86_64 = 'x86_64';
     public const ARCH_AARCH64 = 'aarch64';
@@ -32,8 +33,17 @@ class PlatformDetector
             return self::PLATFORM_WINDOWS;
         }
 
-        // Default to Linux for Unix-like systems
-        return self::PLATFORM_LINUX;
+        if (stripos($os, 'Linux') !== false) {
+            return self::PLATFORM_LINUX;
+        }
+
+        // Anything else is genuinely unknown, and saying "linux" was worse than
+        // saying nothing: FreeBSD, SunOS and Cygwin (which contains "WIN", but
+        // not at offset 0) all reported Linux, so isSupported() answered true
+        // and binary resolution went looking for a glibc Linux ELF that cannot
+        // execute on any of them — surfacing later as a confusing
+        // "not found for linux-x86_64", or an exec-format error.
+        return self::PLATFORM_UNKNOWN;
     }
 
     /**
@@ -83,7 +93,14 @@ class PlatformDetector
         // not be spawned at all. The null check alone let `false` through to
         // stripos(), where it silently coerced to '' and every probe below
         // quietly missed.
-        $lddOutput = @shell_exec('ldd --version 2>&1');
+        //
+        // function_exists() first: since PHP 8.0 a name in disable_functions
+        // behaves as UNDEFINED, so calling it throws an Error that `@` does not
+        // suppress. shell_exec is among the first things hardened hosts disable,
+        // and such a host is exactly where the FFI engine — which needs no
+        // subprocess at all — should still work. Method 3 below reaches the same
+        // answer from the filesystem.
+        $lddOutput = function_exists('shell_exec') ? @shell_exec('ldd --version 2>&1') : null;
         if (is_string($lddOutput)) {
             if (stripos($lddOutput, 'musl') !== false) {
                 return self::LIBC_MUSL;

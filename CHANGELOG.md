@@ -4,10 +4,52 @@ All notable changes to `php-impersonate` will be documented in this file.
 
 ## Unreleased
 
+### Fixed
+
+- **A bodyless POST no longer sends the process's stdin as the request body.** With `CURLOPT_POST` set and no post-field size declared, libcurl reads the body from its default read callback — `fread()` on stdin — so `PHPImpersonate::post($url)` with no data transmitted whatever was piped into the calling process, and hung indefinitely when stdin was a pipe that stayed open (the transfer never starts, so `CURLOPT_TIMEOUT_MS` cannot fire).
+- **The process engine no longer reports a failed transfer as a successful response.** It threw only when the exit code was non-zero *and* no status had been captured, but `-w '%{http_code}'` prints the status curl already received — so a partial file (18), a mid-body timeout (28), a receive error (56) or an HTTP/2 stream error (92) came back as an ordinary 200 with a silently truncated body, while the FFI engine threw for the same bytes. Both engines now excuse exactly one code, `CURLE_TOO_MANY_REDIRECTS`.
+- **Response trailers no longer displace the real headers.** libcurl delivers trailer fields through the header callback, after the blank line that ends the header block, so on a trailered response the parser kept only the trailers — `Content-Type`, `Set-Cookie` and the status line all vanished.
+- **Redirects are restricted to http/https on both engines.** The initial URL was allow-listed, but curl's redirect default also permits ftp/ftps, so a server could answer `Location: ftp://internal-host/` and reach a scheme this client refuses on input.
+- **Request URLs no longer reach `argv`.** A URL can carry `user:password@` userinfo or a token in its query string, and as a positional argument it was readable from `/proc/<pid>/cmdline` for the life of the request. It now travels in the same 0600 config file as the proxy credentials.
+- **The HTTP method is validated** as an RFC 9110 token. It was the one thing reaching the wire unchecked, and the bundled curl does not reject CR/LF in it either.
+- **`-S` accompanies `-s`**, so a failed request names its cause instead of reporting `exit code 6: 000`.
+- **`shell_exec` is guarded with `function_exists()`.** Since PHP 8.0 a name in `disable_functions` throws an `Error` that `@` cannot suppress, which fataled libc detection on hardened hosts — exactly where the subprocess-free FFI engine should still work.
+- **obs-fold header continuations are rejoined** instead of being dropped or parsed as headers with nonsense names.
+- **`+json` media types** (`application/merge-patch+json`, `application/vnd.api+json`, …) are encoded as JSON rather than form data.
+- **An empty header value is sent, not silently deleted.** libcurl reads `Name:` as *remove this header*, so `['Accept-Language' => '']` stripped that line out of the browser profile; the `Name;` form is now used.
+- **`'proxy' => ''`** is honoured — curl's documented way to bypass an environment proxy — instead of being dropped without a word.
+- **An unusable `CURL_CA_BUNDLE`/`SSL_CERT_FILE` fails closed** rather than silently falling back to the system trust store and widening what is trusted.
+- **A boolean curl option that curl would not recognise is rejected** instead of quietly meaning "off".
+- **`boundary=""`** no longer produces a Content-Type carrying two conflicting boundary parameters.
+- **HEAD with a body behaves the same on both engines** (the body is dropped, as the FFI engine already did, rather than failing at curl's argument parsing).
+- **The subprocess output loop no longer busy-spins on Windows**, where `stream_select()` fails on `proc_open` pipes and returned immediately.
+- **Unknown operating systems are reported as unknown.** FreeBSD, Solaris and Cygwin were all reported as Linux, so `isSupported()` answered true and resolution went looking for a Linux ELF that cannot run there.
+- **`CurlImpersonate::isSupported()` honours an explicit `ffi.enable=0`** on the CLI, where it previously answered true while `FFI::cdef()` threw.
+- **`PlatformNotSupportedException` extends `RuntimeException`**, so it is no longer the one error that escapes every documented catch.
+- **`bin/VERSION` is only stamped by a complete run.** `--libs-only` and `--only` left it claiming a version no bundled binary was at.
+- **`--version=TAG` is no longer ignored** by the installer when files already exist — it used to report the requested version as installed while the old one sat on disk.
+- **`deploy.sh` refuses to release from a branch other than `main`**, checks the remote for the tag, and pushes the branch before tagging so a rejected push cannot strand a local tag.
+
+### Added
+
+- **`PHPImpersonateException`**: a marker interface on every exception the library throws. `catch (RequestException)` alone never covered argument errors — `InvalidArgumentException` extends `LogicException` — so one catch now covers everything without changing any existing parent.
+- **`bin/CHECKSUMS`**: sha256 digests of every bundled artifact, written by `scripts/update-binaries.php` and verified by `bin/php-impersonate-install`. Upstream publishes neither checksums nor signatures, so this is a trust-on-first-use pin; previously a truncated or tampered download was installed unverified for the six platforms that cannot be executed on the host.
+- **`Configuration::reset()`**, which can actually restore the built-in configuration — `setPlatformConfig()` merges, so it could never remove a key a test had added.
+- **`REQUIRE_LIVE_SERVICES=1`** makes an unreachable test service a failure rather than a skip, so a rate-limited fingerprint run cannot go green having verified nothing.
+- Tests for the client contract (timeout bounds, invalid browser names, the custom-profile guard that keeps a hand-built fingerprint off the by-name FFI engine), per-profile client-hint/User-Agent coherence across all 39 profiles, engine parity on full header *values* rather than names alone, and a connection-reuse test that can actually fail.
+
+### Changed
+
+- **Removed 7.2 MB of unusable Windows DLLs** (`libcurl-impersonate.dll`, `libcurl.dll`, `zlib.dll`). The FFI engine is POSIX-only so the first could never be loaded, and `curl.exe` is statically linked — its import table names only system DLLs.
+- **`BrowserConfig` is built once per process** instead of reconstructing a ~1200-line literal on every `getConfig()`, `hasConfig()` and `getAvailableBrowsers()` call.
+- **`scripts/update-browsers.php` defaults to the `bin/VERSION` tag** rather than upstream `main`, so a generated config is always backed by a binary that supports it.
+- **CI**: the path filter now covers `tests/fixtures/**` (the fingerprint baseline previously triggered no run at all), `push` is limited to `main` so PR branches stop running the matrix twice, PHP 8.5 is tested, Composer downloads are cached, and the style fixer runs on pull requests with a pinned image so its commits cannot land on `main` untested.
+- **Local test server** switched to `mccutchen/go-httpbin`, which publishes arm64 images and is maintained; `kennethreitz/httpbin` is amd64-only and unbuilt since 2018.
+
 ### Added
 
 - **In-process FFI engine**: `PHPImpersonate` can now call `libcurl-impersonate` directly via PHP FFI — no process spawn, and keep-alive connections are reused across requests. The default `'auto'` engine picks FFI when usable and falls back to the executable engine transparently; force one with `engine: PHPImpersonate::ENGINE_FFI` / `ENGINE_PROCESS`. New helpers: `PHPImpersonate::ffiAvailable()` and `$client->engine()`.
-- **Bundled FFI shared libraries** for Linux x86_64 (glibc), macOS ARM64 and Windows x86_64, alongside the executables; the bundled upstream curl-impersonate version is pinned in `bin/VERSION` (currently v2.1.1 from [lexiforest/curl-impersonate](https://github.com/lexiforest/curl-impersonate)).
+- **Bundled FFI shared libraries** for Linux x86_64 (glibc and musl) and macOS ARM64, alongside the executables (the FFI engine is POSIX-only, so Windows ships the executable alone); the bundled upstream curl-impersonate version is pinned in `bin/VERSION` (currently v2.1.1 from [lexiforest/curl-impersonate](https://github.com/lexiforest/curl-impersonate)).
 - **Installer for on-demand platforms**: `bin/php-impersonate-install` downloads the matching binary and library on Linux musl/Alpine, Linux ARM64 and macOS Intel (`composer install-binaries` from a clone).
 - **8 new browser profiles**: `chrome142`, `chrome145`, `chrome146`, `chrome150`, `firefox144`, `firefox147`, `safari2601`, `okhttp4_android` — 39 profiles total.
 - **Local test server**: `composer test-server-up` starts a Dockerised httpbin so the behaviour tests run offline instead of hitting public services.

@@ -2,7 +2,7 @@
 
 namespace Raza\PHPImpersonate\Support;
 
-use InvalidArgumentException;
+use Raza\PHPImpersonate\Exception\InvalidArgumentException;
 
 /**
  * The single, typed allow-list of custom curl options both engines accept.
@@ -51,6 +51,28 @@ final class CurlOptions
         'max-redirs' => [self::TYPE_LONG,   self::CURLOPT_MAXREDIRS],
         'insecure' => [self::TYPE_BOOL,   null],
     ];
+
+    /**
+     * Options where an EMPTY string is itself a value rather than an absent one.
+     *
+     * curl documents `--proxy ""` (CURLOPT_PROXY set to "") as the way to
+     * disable proxying for a transfer, overriding the http_proxy/HTTPS_PROXY
+     * environment variables libcurl otherwise honours. Dropped along with the
+     * other empty strings, it left a caller no way to say "go direct" — and
+     * said nothing about having ignored what they passed.
+     *
+     * @var list<string>
+     */
+    private const EMPTY_IS_MEANINGFUL = ['proxy'];
+
+    /**
+     * Whether an empty string is a meaningful value for this option, rather
+     * than a way of spelling "unset". See {@see EMPTY_IS_MEANINGFUL}.
+     */
+    public static function emptyIsMeaningful(string $key): bool
+    {
+        return in_array($key, self::EMPTY_IS_MEANINGFUL, true);
+    }
 
     /**
      * @return list<string>
@@ -129,6 +151,23 @@ final class CurlOptions
                 ));
             }
 
+            // Reject a boolean value curl would not recognise instead of quietly
+            // reading it as "off". filter_var() collapses everything it does not
+            // know to false, so `'insecure' => 'enable'` (or a typo like 'ture')
+            // used to mean the opposite of what the caller wrote, with nothing
+            // said — out of step with every other check in this class, which
+            // throws. FILTER_NULL_ON_FAILURE is what distinguishes "false" from
+            // "not a boolean at all".
+            if (self::type($key) === self::TYPE_BOOL
+                && filter_var($value, FILTER_VALIDATE_BOOL, FILTER_NULL_ON_FAILURE) === null) {
+                throw new InvalidArgumentException(sprintf(
+                    'Invalid value for curl option "%s": expected a boolean, %s given. '
+                    . 'Accepted: true/false, 1/0, "1"/"0", "true"/"false", "yes"/"no", "on"/"off".',
+                    $key,
+                    var_export($value, true)
+                ));
+            }
+
             // No control characters in a value, ever. The executable engine
             // renders the credential-bearing options into curl's config file,
             // whose format is line-oriented: a newline ends the line and curl
@@ -189,7 +228,7 @@ final class CurlOptions
 
                 case self::TYPE_STRING:
                     $string = (string) $value;
-                    if ($string !== '') {
+                    if ($string !== '' || self::emptyIsMeaningful($key)) {
                         $normalized[$key] = $string;
                     }
 

@@ -2,6 +2,8 @@
 
 namespace Raza\PHPImpersonate\Support;
 
+use Raza\PHPImpersonate\Exception\RequestException;
+
 /**
  * Locates a CA certificate bundle. curl-impersonate uses BoringSSL, which does
  * not auto-discover the system trust store on Linux, so an explicit path is
@@ -41,14 +43,35 @@ final class CaBundle
      * The environment is consulted FIRST: setting CURL_CA_BUNDLE or
      * SSL_CERT_FILE is how an operator points the client at a specific bundle,
      * and it must not be silently ignored just because the distro also ships one.
+     * An override that is set but unusable therefore throws rather than falling
+     * back — see the check below. ({@see directory()} still falls back, because
+     * SSL_CERT_DIR supplements a bundle rather than replacing it.)
+     *
+     * @throws RequestException If an override is set but is not a readable file.
      */
     public static function path(): ?string
     {
         foreach (self::ENV_VARS as $var) {
             $value = getenv($var);
-            if (is_string($value) && $value !== '' && is_file($value) && is_readable($value)) {
+            if (! is_string($value) || $value === '') {
+                continue;
+            }
+
+            if (is_file($value) && is_readable($value)) {
                 return $value;
             }
+
+            // Set but unusable: fail rather than fall through to the system
+            // store. An operator who points this at a corporate CA is usually
+            // NARROWING what to trust, so silently substituting the distro
+            // bundle widens it back — the opposite of the instruction, and
+            // invisible. curl fails closed on an unreadable CA file too.
+            throw new RequestException(sprintf(
+                '%s is set to "%s", which is not a readable file. Fix the path or unset '
+                . 'the variable to use the system trust store.',
+                $var,
+                $value
+            ));
         }
 
         foreach (self::LINUX_PATHS as $path) {

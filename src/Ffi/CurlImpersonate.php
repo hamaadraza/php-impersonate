@@ -5,6 +5,7 @@ namespace Raza\PHPImpersonate\Ffi;
 use FFI;
 use Raza\PHPImpersonate\Support\CaBundle;
 use Raza\PHPImpersonate\Support\CurlOptions;
+use Raza\PHPImpersonate\Support\RequestPreparer;
 use Raza\PHPImpersonate\Platform\PlatformDetector;
 use Raza\PHPImpersonate\Exception\RequestException;
 
@@ -35,6 +36,17 @@ final class CurlImpersonate
     private const CURLOPT_CAINFO = 10065;
     private const CURLOPT_ACCEPT_ENCODING = 10102;
     private const CURLOPT_SSL_SESSIONID_CACHE = 150;
+
+    /**
+     * Long-typed protocol bitmask, deliberately in preference to the newer
+     * CURLOPT_REDIR_PROTOCOLS_STR (10183): the bundled library answers 48
+     * (CURLE_UNKNOWN_OPTION) for the string form despite reporting curl 8.x,
+     * while it accepts this one. Verified against the bundled libraries.
+     */
+    private const CURLOPT_REDIR_PROTOCOLS = 182;
+
+    /** CURLPROTO_HTTP | CURLPROTO_HTTPS. */
+    private const CURLPROTO_HTTP_HTTPS = 1 | 2;
     private const CURLINFO_RESPONSE_CODE = 2097154;
 
     private const CURLE_OK = 0;
@@ -97,13 +109,25 @@ final class CurlImpersonate
         if (PlatformDetector::isWindows()) {
             return false;
         }
-        // FFI is always enabled on the CLI; other SAPIs need ffi.enable truthy
-        // (a "preload" setting only permits FFI from preloaded files).
+        $enable = strtolower(trim((string) ini_get('ffi.enable')));
+
+        // An explicit "off" wins everywhere, the CLI included: a hardened
+        // php-cli.ini can set ffi.enable=0, and FFI::cdef() then throws
+        // "FFI API is restricted by ffi.enable". Answering true on the strength
+        // of the SAPI alone left this predicate disagreeing with the engine it
+        // describes. (Verified against `php -d ffi.enable=0`.)
+        if (in_array($enable, ['0', 'false', 'off', 'no'], true)) {
+            return false;
+        }
+
+        // Otherwise the CLI always has FFI, whatever the setting says — its
+        // default is "preload", and FFI works there regardless.
         if (PHP_SAPI === 'cli') {
             return true;
         }
-        $enable = strtolower((string) ini_get('ffi.enable'));
 
+        // Elsewhere it takes an explicit "on": the default "preload" permits FFI
+        // only from preloaded files, which ordinary request code is not.
         return in_array($enable, ['1', 'true', 'on', 'yes'], true);
     }
 
@@ -152,6 +176,25 @@ final class CurlImpersonate
             // Cap redirects to match the executable engine (curl's tool default);
             // without this, libcurl's default differs and the engines disagree.
             $ffi->curl_easy_setopt($h, self::CURLOPT_MAXREDIRS, self::MAX_REDIRECTS);
+            // Redirects may only go where the initial URL was allowed to.
+            // RequestPreparer::validateRequest() allow-lists http/https, but
+            // libcurl's redirect default also permits ftp/ftps, so a server
+            // could answer `Location: ftp://internal-host/` and reach a scheme
+            // this client explicitly refuses to speak.
+            //
+            // The return code is checked because this one is a security
+            // boundary: a library that does not know the option would otherwise
+            // leave redirects unrestricted with nothing said, which is exactly
+            // the silent-failure mode the restriction exists to prevent.
+            $rc = $ffi->curl_easy_setopt($h, self::CURLOPT_REDIR_PROTOCOLS, self::CURLPROTO_HTTP_HTTPS);
+            if ($rc !== self::CURLE_OK) {
+                throw new RequestException(
+                    "libcurl-impersonate: could not restrict redirect protocols to http/https ($rc). "
+                    . 'Refusing to send the request, because a redirect could otherwise reach '
+                    . 'a scheme this client rejects on input.',
+                    $rc
+                );
+            }
             $ffi->curl_easy_setopt($h, self::CURLOPT_TIMEOUT_MS, $timeout * 1000);
             $ffi->curl_easy_setopt($h, self::CURLOPT_CONNECTTIMEOUT_MS, $timeout * 1000);
             $ffi->curl_easy_setopt($h, self::CURLOPT_WRITEDATA, $bodyFp);
@@ -339,7 +382,10 @@ final class CurlImpersonate
 
             switch (CurlOptions::type($key)) {
                 case CurlOptions::TYPE_STRING:
-                    if ($value !== null && $value !== '') {
+                    // An empty string still reaches libcurl where it MEANS
+                    // something — `proxy` set to "" is how a transfer opts out
+                    // of the environment's proxy. See CurlOptions::normalize().
+                    if ($value !== null && ($value !== '' || CurlOptions::emptyIsMeaningful($key))) {
                         $this->ffi->curl_easy_setopt($h, CurlOptions::optId($key), (string) $value);
                     }
 
@@ -396,7 +442,7 @@ final class CurlImpersonate
     {
         $list = null;
         foreach ($headers as $name => $value) {
-            $list = $this->ffi->curl_slist_append($list, "$name: $value");
+            $list = $this->ffi->curl_slist_append($list, RequestPreparer::headerLine((string) $name, $value));
         }
 
         return $list;

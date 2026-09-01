@@ -1,9 +1,24 @@
 name: Check & fix styling
 
+# Runs on pull requests rather than on every push to any branch.
+#
+# Pushing a fix straight to a branch used the default GITHUB_TOKEN, and commits
+# made with that token do not trigger other workflows — so the Tests workflow
+# never ran on the resulting "Fix styling" commit, and a risky-rule rewrite
+# could land on main with no test or PHPStan run behind it. On a pull request
+# the fix is committed to the PR branch, where the pull_request event still
+# reports and the change is reviewed before it merges.
+#
+# It also drops a dead `ref: ${{ github.head_ref }}`: that expression is only
+# populated for pull_request events, so under the previous `on: push` trigger it
+# was always empty. And because GitHub does not evaluate `paths:` filters for
+# tag pushes, the old trigger additionally ran this on release tags, checking out
+# a detached HEAD that git-auto-commit-action cannot commit to.
 on:
-  push:
+  pull_request:
     paths:
       - '**.php'
+      - '.php-cs-fixer.dist.php'
 
 permissions:
   contents: write
@@ -19,10 +34,14 @@ jobs:
         with:
           ref: ${{ github.head_ref }}
 
+      # Pinned by digest-bearing tag rather than the floating `latest` the bare
+      # image name resolves to: an unpinned fixer can apply rules the version in
+      # composer.json ("friendsofphp/php-cs-fixer": "^3.21.1") would not, so CI
+      # and a contributor's local `composer format` disagree about the code.
       - name: Run PHP CS Fixer
-        uses: docker://oskarstark/php-cs-fixer-ga
+        uses: docker://ghcr.io/php-cs-fixer/php-cs-fixer:3.94.2
         with:
-          args: --config=.php-cs-fixer.dist.php --allow-risky=yes
+          args: fix --config=.php-cs-fixer.dist.php --allow-risky=yes
 
       - name: Commit changes
         uses: stefanzweifel/git-auto-commit-action@v7

@@ -127,16 +127,45 @@ class Response
     }
 
     /**
-     * Dump response details for debugging.
+     * Response headers whose values are masked by {@see dump()}. Set-Cookie is
+     * the one that matters in practice — a session cookie is a bearer
+     * credential, and dumps are pasted into issues and tickets.
+     *
+     * @var list<string>
      */
-    public function dump(): string
+    private const SENSITIVE_HEADERS = [
+        'set-cookie',
+        'set-cookie2',
+        'authorization',
+        'proxy-authorization',
+        'www-authenticate',
+        'proxy-authenticate',
+        'x-api-key',
+        'x-auth-token',
+        'x-csrf-token',
+    ];
+
+    /**
+     * Dump response details for debugging.
+     *
+     * Values of headers that carry credentials are masked by default: this
+     * string is written to a log or pasted into a bug report far more often
+     * than it is read once and discarded, and a leaked Set-Cookie is a session.
+     * Pass false to see them verbatim.
+     *
+     * The BODY is never masked — it cannot be, in general — so a dump is still
+     * not something to log unconsidered when the response carries a token.
+     */
+    public function dump(bool $maskCredentials = true): string
     {
         $output = "HTTP Status: {$this->statusCode}\n\n";
 
         $output .= "Headers:\n";
         foreach ($this->headers as $name => $values) {
+            $mask = $maskCredentials && in_array(strtolower($name), self::SENSITIVE_HEADERS, true);
+
             foreach ($values as $value) {
-                $output .= "$name: $value\n";
+                $output .= $name . ': ' . ($mask ? '***' : $value) . "\n";
             }
         }
 
@@ -155,9 +184,9 @@ class Response
      *
      * @return self
      */
-    public function debug(): self
+    public function debug(bool $maskCredentials = true): self
     {
-        echo $this->dump();
+        echo $this->dump($maskCredentials);
 
         return $this;
     }

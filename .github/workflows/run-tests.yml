@@ -8,7 +8,6 @@ on:
       - 'phpunit.xml.dist'
       - 'phpstan.neon.dist'
       - 'composer.json'
-      - 'composer.lock'
       - 'bin/**'
   pull_request:
     paths:
@@ -17,7 +16,6 @@ on:
       - 'phpunit.xml.dist'
       - 'phpstan.neon.dist'
       - 'composer.json'
-      - 'composer.lock'
       - 'bin/**'
 
 jobs:

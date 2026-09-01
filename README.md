@@ -105,11 +105,11 @@ $response = PHPImpersonate::get('https://example.com');   // auto engine
 **Static helpers** — one-liners for one-off requests:
 
 ```php
-PHPImpersonate::get(string $url, array $headers = [], int $timeout = 30, string $browser = 'firefox147', array $curlOptions = []): Response;
-PHPImpersonate::post(string $url, ?array $data = null, array $headers = [], int $timeout = 30, string $browser = 'firefox147', array $curlOptions = []): Response;
+PHPImpersonate::get(string $url, array $headers = [], int $timeout = 30, string $browser = 'firefox147', array $curlOptions = [], string $engine = 'auto'): Response;
+PHPImpersonate::post(string $url, ?array $data = null, array $headers = [], int $timeout = 30, string $browser = 'firefox147', array $curlOptions = [], string $engine = 'auto'): Response;
 PHPImpersonate::put(/* … same shape as post … */): Response;
 PHPImpersonate::patch(/* … same shape as post … */): Response;
-PHPImpersonate::delete(string $url, array $headers = [], int $timeout = 30, string $browser = 'firefox147', array $curlOptions = []): Response;
+PHPImpersonate::delete(string $url, array $headers = [], int $timeout = 30, string $browser = 'firefox147', array $curlOptions = [], string $engine = 'auto'): Response;
 PHPImpersonate::head(/* … same shape as delete … */): Response;
 
 $response = PHPImpersonate::get('https://example.com', [], 30, 'chrome146');

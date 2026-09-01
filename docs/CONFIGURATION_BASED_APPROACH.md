@@ -1,202 +1,123 @@
-# Configuration-Based Browser Impersonation
+# How browser impersonation is configured
 
-This document describes the new configuration-based approach for browser impersonation in PHP Impersonate, which replaces the individual browser scripts with a centralized configuration system.
+A contributor's map of where a browser profile lives, which engine reads it, and
+how to change one. For usage, see the README — this describes the internals.
 
-## Overview
+> Superseded content: this file used to document the migration away from
+> per-browser shell scripts (`curl_chrome99`, …). That migration is long done and
+> those scripts no longer exist, so the historical framing has been removed.
 
-Instead of having individual browser scripts (like `curl_chrome99`, `curl_firefox133`, etc.), the library now uses a centralized `BrowserConfig` class that contains all browser configurations as PHP arrays. This approach provides better maintainability, consistency, and ease of use.
+## The part that surprises people first
 
-## How It Works
+There are two engines, and **they do not both read `BrowserConfig`**:
 
-### 1. BrowserConfig Class
+| Engine | Class | Where the fingerprint comes from |
+| --- | --- | --- |
+| Executable | `Process\CurlProcess` | `Browser\BrowserConfig` — this repo's PHP arrays, rendered into curl flags |
+| FFI | `Ffi\CurlImpersonate` | The shared library's own built-in profile, applied by name via `curl_easy_impersonate()` |
 
-The `BrowserConfig` class contains all browser configurations in a structured format:
+`'auto'` prefers FFI, so **on a default install `BrowserConfig` is not what goes
+on the wire**. Editing a profile and seeing no change is the usual first
+confusion: force `engine: 'process'` to exercise it, and note that a name absent
+from the bundled library fails under FFI even though `BrowserConfig` has it.
+
+Keeping the two in step is what `tests/EngineParityTest.php` and
+`tests/FingerprintBaselineTest.php` exist for.
+
+## BrowserConfig
 
 ```php
 use Raza\PHPImpersonate\Browser\BrowserConfig;
 
-// Get all available browser configurations
-$configs = BrowserConfig::getAllConfigs();
-
-// Get configuration for a specific browser
-$chromeConfig = BrowserConfig::getConfig('chrome99');
-
-// Get list of available browsers
-$browsers = BrowserConfig::getAvailableBrowsers();
-
-// Check if a browser is supported
-if (BrowserConfig::hasConfig('firefox133')) {
-    // Browser is supported
-}
+BrowserConfig::getAllConfigs();          // every profile
+BrowserConfig::getConfig('chrome146');   // one profile (throws if unknown)
+BrowserConfig::getAvailableBrowsers();   // the names
+BrowserConfig::hasConfig('firefox147');  // membership test
 ```
 
-### 2. Configuration Structure
+Each profile holds:
 
-Each browser configuration contains:
+- **ciphers** — TLS cipher suite list
+- **curves** — elliptic curves (optional)
+- **signature-hashes** — signature algorithms (optional)
+- **headers** — the profile's default request headers, in wire order
+- **options** — curl-impersonate flags (HTTP/2 settings, TLS extension order, …)
 
-- **ciphers**: TLS cipher suite configuration
-- **curves**: Elliptic curve configuration (optional)
-- **signature-hashes**: Signature hash algorithms (optional)
-- **headers**: HTTP headers including User-Agent, Accept, etc.
-- **options**: curl-impersonate specific options
-
-Example configuration:
 ```php
-'chrome99' => [
-    'ciphers' => 'TLS_AES_128_GCM_SHA256:TLS_AES_256_GCM_SHA384:...',
+'chrome146' => [
+    'ciphers' => 'TLS_AES_128_GCM_SHA256:TLS_AES_256_GCM_SHA384:…',
     'headers' => [
-        'User-Agent' => 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36...',
-        'Accept' => 'text/html,application/xhtml+xml,application/xml;q=0.9...',
-        'sec-ch-ua' => '" Not A;Brand";v="99", "Chromium";v="99", "Google Chrome";v="99"',
-        // ... more headers
+        'sec-ch-ua' => '"Chromium";v="146", …',
+        'User-Agent' => 'Mozilla/5.0 (Macintosh; …) Chrome/146.0.0.0 Safari/537.36',
+        // … in the order the browser sends them
     ],
     'options' => [
         'http2' => true,
-        'http2-settings' => '1:65536;3:1000;4:6291456;6:262144',
+        'http2-settings' => '1:65536;2:0;4:6291456;6:262144',
         'compressed' => true,
         'tlsv1.2' => true,
-        // ... more options
+        // …
     ],
-]
+],
 ```
 
-### 3. Usage
+Two details that are easy to get wrong:
 
-The usage remains the same as before:
+- **Header order is part of the fingerprint.** The array order is the wire
+  order. A caller's header replaces the profile's *in place* rather than being
+  prepended — `CurlProcess::collectHeaderLines()` reproduces libcurl's
+  `Curl_http_merge_headers` so both engines frame headers identically.
+- **`headers` is not merged into `options`.** The profile's headers reach curl
+  through one `-H @file`, so that a single list preserves their order and no
+  credential lands in argv.
 
-```php
-use Raza\PHPImpersonate\PHPImpersonate;
+## The available browsers
 
-// Make a request with Chrome 99
-$response = PHPImpersonate::get(
-    'https://example.com',
-    [],
-    30,
-    'chrome99'
-);
+Deliberately not listed here — a hardcoded list is exactly what drifts. The
+source of truth is `BrowserConfig::getAvailableBrowsers()`, mirrored by the
+`Browser\BrowserName` constants:
 
-// Make a request with Firefox 133
-$response = PHPImpersonate::get(
-    'https://example.com',
-    [],
-    30,
-    'firefox133'
-);
+```bash
+php -r 'require "vendor/autoload.php";
+  echo implode("\n", Raza\PHPImpersonate\Browser\BrowserConfig::getAvailableBrowsers()), "\n";'
 ```
 
-## Benefits
+## Adding or updating a profile
 
-### 1. **Centralized Configuration**
-- All browser configurations are in one place
-- Easier to maintain and update
-- Consistent structure across all browsers
+Profiles are generated from upstream rather than hand-written:
 
-### 2. **No File System Overhead**
-- No need for individual browser script files
-- Reduced disk space usage
-- Faster initialization
-
-### 3. **Better Maintainability**
-- Easy to add new browser configurations
-- Simple to modify existing configurations
-- Version control friendly
-
-### 4. **Improved Testing**
-- Configurations can be easily validated
-- Unit tests for configuration structure
-- Better error handling
-
-### 5. **Platform Independence**
-- Works the same on Linux and Windows
-- No platform-specific script files needed
-- Consistent behavior across platforms
-
-## Adding New Browser Configurations
-
-To add a new browser configuration:
-
-1. **Extract the configuration** from the existing browser script:
-   ```bash
-   # Example: Extract Chrome 120 configuration
-   cat bin/linux/curl_chrome120
-   ```
-
-2. **Add to BrowserConfig class**:
-   ```php
-   'chrome120' => [
-       'ciphers' => '...',
-       'headers' => [
-           'User-Agent' => '...',
-           // ... other headers
-       ],
-       'options' => [
-           'http2' => true,
-           // ... other options
-       ],
-   ],
-   ```
-
-3. **Update tests** to include the new browser
-
-## Migration from Script-Based Approach
-
-The migration is seamless - existing code will continue to work without changes:
-
-```php
-// This still works exactly the same
-$response = PHPImpersonate::get('https://example.com', [], 30, 'chrome99');
+```bash
+composer update-impersonate      # binaries + configs, in that order
+# or individually:
+composer update-binaries         # refresh bin/ and bin/VERSION
+composer update-browsers         # append profiles new to lexiforest/curl-impersonate
 ```
 
-The only difference is that the library now uses the centralized configuration instead of looking for individual script files.
+`scripts/update-browsers.php` parses upstream's `impersonate_opts` table and is
+append-only: it never rewrites a profile already present, so re-running is safe.
+It also adds the matching `BrowserName` constant and updates the
+`@phpstan-type BrowserName` unions.
 
-## Available Browsers
+After a binary update the fingerprints may legitimately change. Verify the new
+ones are what a real browser sends, then re-pin the baseline:
 
-The following browsers are currently supported:
+```bash
+composer update-fingerprint-baseline
+```
 
-- `chrome99` - Google Chrome 99 (Windows)
-- `chrome99_android` - Google Chrome 99 (Android)
-- `chrome110` - Google Chrome 110 (Windows)
-- `chrome120` - Google Chrome 120 (macOS)
-- `edge99` - Microsoft Edge 99 (Windows)
-- `firefox133` - Mozilla Firefox 133 (macOS)
-- `safari153` - Safari 15.3 (macOS)
-- `safari172_ios` - Safari 17.2 (iOS)
-- `safari260` - Safari 26.0 (macOS)
+Then `composer format && composer test`.
 
-## Technical Details
+## Where a request is actually assembled
 
-### Browser Class Changes
+- `PHPImpersonate` — validation, engine selection, the shared FFI engine cache
+- `Support\RequestPreparer` — URL and header validation, body encoding
+- `Support\CurlOptions` — the typed allow-list of caller-supplied curl options
+- `Process\CurlProcess` — builds the argv and runs the binary (**command
+  building lives here**, not in `PHPImpersonate`)
+- `Platform\CommandBuilder` — renders an options array into argv
+- `Ffi\CurlImpersonate` — the in-process engine, via `curl_easy_setopt`
 
-The `Browser` class now:
-1. Validates browser names against `BrowserConfig`
-2. Resolves the main `curl-impersonate` binary path
-3. Provides access to browser configuration
-
-### PHPImpersonate Class Changes
-
-The `PHPImpersonate` class now:
-1. Merges browser configuration with request options
-2. Applies browser-specific headers and TLS settings
-3. Maintains backward compatibility
-
-### Command Building
-
-The command building process:
-1. Starts with base curl options (method, output files, etc.)
-2. Merges browser-specific configuration
-3. Applies custom curl options
-4. Builds the final command using `CommandBuilder`
-
-## Future Enhancements
-
-Potential improvements for the configuration-based approach:
-
-1. **Dynamic Configuration Loading**: Load configurations from external files
-2. **Configuration Validation**: Validate configurations at runtime
-3. **Custom Browser Support**: Allow users to define custom browser configurations
-4. **Configuration Versioning**: Support for different configuration versions
-5. **Performance Optimization**: Cache compiled configurations
-
-## Conclusion
-
-The configuration-based approach provides a more maintainable, efficient, and user-friendly way to handle browser impersonation. It eliminates the need for individual script files while maintaining full functionality and backward compatibility.
+Fingerprint-affecting options (ciphers, curves, `tls-*`, HTTP version,
+`User-Agent`) are intentionally absent from `CurlOptions`: making them
+configurable would let a caller silently break the impersonation the library
+exists to provide.

@@ -75,6 +75,13 @@ class PHPImpersonate implements ClientInterface
      * callers can mint unlimited distinct keys (e.g. a new proxy per request),
      * which in a long-running worker would otherwise grow without limit.
      *
+     * NOT REENTRANT. Sharing an engine means sharing one curl easy handle, which
+     * is correct under ordinary sequential PHP but assumes one request is in
+     * flight at a time. Two requests interleaved on the same key — Fibers,
+     * Swoole coroutines, ext-parallel — would reconfigure and read the same
+     * handle underneath each other. Under such a runtime, give each concurrent
+     * worker its own process, or keep them on distinct keys.
+     *
      * @var array<string, CurlImpersonate>
      */
     private static array $ffiEngines = [];

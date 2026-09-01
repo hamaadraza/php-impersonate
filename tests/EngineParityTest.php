@@ -62,6 +62,90 @@ class EngineParityTest extends TestCase
         );
     }
 
+    /**
+     * The two engines must put headers on the wire in the SAME order.
+     *
+     * Nothing asserted this, which is how F-02 survived: the executable engine
+     * emitted the caller's headers ahead of the whole browser profile, so an
+     * Authorization line preceded sec-ch-ua while the FFI engine put it last.
+     * Both engines returned identical JA4, so the parity suite stayed green —
+     * TLS parity says nothing about HTTP.
+     *
+     * The service reports the real HTTP/2 HEADERS frame, pseudo-headers
+     * included, so this compares what was actually framed rather than what a
+     * server chose to echo back.
+     */
+    public function testBothEnginesSendHeadersInTheSameOrder(): void
+    {
+        TestServer::requireTls($this);
+
+        $ffi = $this->headerOrder(PHPImpersonate::ENGINE_FFI);
+        $process = $this->headerOrder(PHPImpersonate::ENGINE_PROCESS);
+
+        $this->assertNotSame([], $ffi, 'no HEADERS frame was reported for the FFI engine');
+
+        $this->assertSame(
+            $ffi,
+            $process,
+            "the engines framed headers in different orders\nffi:     " . implode(', ', $ffi)
+                . "\nprocess: " . implode(', ', $process)
+        );
+
+        // Agreement alone would be self-referential — two engines can agree on
+        // an order no browser produces, which is precisely what F-02 was. So
+        // also pin the shape absolutely.
+        foreach (['ffi' => $ffi, 'process' => $process] as $engine => $order) {
+            // Pseudo-headers lead, as HTTP/2 requires.
+            $this->assertStringStartsWith(':', $order[0], "$engine: pseudo-headers must come first");
+
+            // A caller header the profile has no counterpart for goes last...
+            $this->assertSame('authorization', end($order), "$engine: a caller-only header must come last");
+
+            // ...while one that overrides a profile header keeps the profile's
+            // slot instead of being hoisted to the front.
+            $language = array_search('accept-language', $order, true);
+            $agent = array_search('user-agent', $order, true);
+            $this->assertIsInt($language);
+            $this->assertIsInt($agent);
+            $this->assertGreaterThan(
+                $agent,
+                $language,
+                "$engine: an overridden header jumped out of its profile slot"
+            );
+        }
+    }
+
+    /**
+     * The lower-cased header names of the request's HTTP/2 HEADERS frame, in
+     * the order they were framed.
+     *
+     * @return list<string>
+     */
+    private function headerOrder(string $engine): array
+    {
+        $body = (new PHPImpersonate('chrome146', 30, [], $engine))->sendGet(
+            TestServer::tls(),
+            // One header that overrides the profile's, one the profile lacks.
+            ['Accept-Language' => 'de-DE', 'Authorization' => 'Bearer parity']
+        )->json();
+
+        foreach ($body['http2']['sent_frames'] ?? [] as $frame) {
+            if (($frame['frame_type'] ?? '') !== 'HEADERS') {
+                continue;
+            }
+
+            $names = [];
+            foreach ($frame['headers'] ?? [] as $header) {
+                $separator = strpos((string) $header, ': ');
+                $names[] = strtolower($separator === false ? (string) $header : substr((string) $header, 0, $separator));
+            }
+
+            return $names;
+        }
+
+        return [];
+    }
+
     public function testCustomOptionsBehaveIdenticallyOnBothEngines(): void
     {
         TestServer::requireHttpbin($this);

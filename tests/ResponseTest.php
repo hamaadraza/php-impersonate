@@ -222,13 +222,62 @@ class ResponseTest extends TestCase
             ],
         ]);
 
-        $dump = $response->dump();
+        // Verbatim on request — this test is about line rendering, not masking.
+        $dump = $response->dump(false);
 
         $this->assertStringContainsString("Set-Cookie: sessionid=abc; Path=/; HttpOnly", $dump);
         $this->assertStringContainsString("Set-Cookie: csrftoken=xyz; Path=/; SameSite=Lax", $dump);
 
         // The header name must appear once per value, not once for all values
         $this->assertEquals(2, substr_count($dump, 'Set-Cookie:'));
+    }
+
+    /**
+     * A dump is written to a log or pasted into a bug report far more often than
+     * it is read once and discarded, and a leaked Set-Cookie is a live session.
+     */
+    public function testDumpMasksCredentialHeadersByDefault(): void
+    {
+        $response = $this->makeResponse([
+            'Set-Cookie' => ['sessionid=abc; Path=/; HttpOnly'],
+            'X-Api-Key' => ['supersecret'],
+            'Content-Type' => ['application/json'],
+        ]);
+
+        $dump = $response->dump();
+
+        $this->assertStringNotContainsString('sessionid=abc', $dump);
+        $this->assertStringNotContainsString('supersecret', $dump);
+        $this->assertStringContainsString('Set-Cookie: ***', $dump);
+        $this->assertStringContainsString('X-Api-Key: ***', $dump);
+
+        // Only the credential-bearing ones: masking everything would make the
+        // dump useless for the debugging it exists for.
+        $this->assertStringContainsString('Content-Type: application/json', $dump);
+    }
+
+    public function testDumpMaskingIsCaseInsensitiveOnHeaderName(): void
+    {
+        // Header names are case-insensitive, so the mask must be too.
+        $dump = $this->makeResponse(['set-COOKIE' => ['sessionid=abc']])->dump();
+
+        $this->assertStringNotContainsString('sessionid=abc', $dump);
+    }
+
+    public function testDebugMaskingMatchesDump(): void
+    {
+        $response = $this->makeResponse(['Set-Cookie' => ['sessionid=abc']]);
+
+        ob_start();
+        $response->debug();
+        $masked = (string) ob_get_clean();
+
+        ob_start();
+        $response->debug(false);
+        $verbatim = (string) ob_get_clean();
+
+        $this->assertStringNotContainsString('sessionid=abc', $masked);
+        $this->assertStringContainsString('sessionid=abc', $verbatim);
     }
 
     public function testDumpRendersSingleValueHeaderCorrectly(): void

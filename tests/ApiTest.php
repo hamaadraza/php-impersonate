@@ -374,64 +374,6 @@ class ApiTest extends TestCase
     }
 
     /**
-     * Debug helper to see actual headers returned
-     */
-    public function testDebugHeaders()
-    {
-        $response = PHPImpersonate::get(TestServer::httpbin('/response-headers'));
-
-        // Capture output to variable instead of printing directly
-        ob_start();
-        echo "Actual headers returned: \n";
-        print_r($response->headers());
-        $output = ob_get_clean();
-
-        // Use PHPUnit's expectation method to tell it we expect this output
-        $this->expectOutputString($output);
-        echo $output;
-    }
-
-    /**
-     * Debug test to see the response format
-     */
-    public function testDebugPutResponse()
-    {
-        $this->waitBetweenRequests();
-
-        $data = ['test' => 'value'];
-        $response = PHPImpersonate::put(TestServer::httpbin('/put'), $data);
-
-        // Capture output to variable instead of printing directly
-        ob_start();
-        echo "Complete response structure:\n";
-        print_r($response->json());
-        $output = ob_get_clean();
-
-        // Use PHPUnit's expectation method to tell it we expect this output
-        $this->expectOutputString($output);
-        echo $output;
-    }
-
-    /**
-     * Verify the basic setup is working
-     */
-    public function testBasicSetup()
-    {
-        $this->waitBetweenRequests();
-
-        // Use PHP's built-in request instead of curl_impersonate for a basic check
-        $result = file_get_contents(TestServer::httpbin('/get'));
-        $this->assertNotFalse($result);
-
-        // Now test file permissions
-        $tempFile = tempnam(sys_get_temp_dir(), 'test_permissions');
-        $this->assertNotFalse($tempFile);
-        $this->assertTrue(is_writable($tempFile));
-        $this->assertTrue(file_put_contents($tempFile, 'test') !== false);
-        $this->assertTrue(unlink($tempFile));
-    }
-
-    /**
      * Test POST request with form data
      */
     public function testPostWithFormData()

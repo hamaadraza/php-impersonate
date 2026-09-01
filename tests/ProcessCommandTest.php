@@ -396,17 +396,27 @@ class ProcessCommandTest extends TestCase
      */
     public function testUnsafeHeaderIsRejectedAndLeavesNoTempFile(): void
     {
-        $before = glob(sys_get_temp_dir() . '/curl_impersonate_request_headers*') ?: [];
+        $engine = new CurlProcess($this->browser([]), 30, []);
+
+        $build = (new ReflectionClass(CurlProcess::class))->getMethod('buildCommand');
+        $build->setAccessible(true);
 
         try {
-            $this->argv([], ['X-Bad' => "value\r\nInjected: 1"]);
+            $build->invoke($engine, 'GET', 'https://example.com/', '/tmp/b', '/tmp/h', ['X-Bad' => "value\r\nInjected: 1"], null);
             $this->fail('an injected header should have been rejected');
-        } catch (InvalidArgumentException $e) {
+        } catch (\ReflectionException | InvalidArgumentException $e) {
             $this->assertStringContainsString('Invalid header', $e->getMessage());
         }
 
-        $after = glob(sys_get_temp_dir() . '/curl_impersonate_request_headers*') ?: [];
-        $this->assertSame($before, $after, 'a rejected request must not leave a temp file behind');
+        // Asserted against the engine's OWN record rather than a glob of the
+        // shared system temp directory, which any concurrent process — another
+        // test worker included — could change underneath this test. The
+        // invariant is that headers are validated before a file is ever
+        // created, so nothing was tracked and nothing needs cleaning up.
+        $tracked = (new ReflectionClass(CurlProcess::class))->getProperty('tempFiles');
+        $tracked->setAccessible(true);
+
+        $this->assertSame([], $tracked->getValue($engine), 'a rejected request must not leave a temp file behind');
     }
 
     /**

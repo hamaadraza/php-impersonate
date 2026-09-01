@@ -277,6 +277,18 @@ final class CurlImpersonate
             return;
         }
 
+        // A bodyless POST is a POST with an EMPTY body, not one whose body is
+        // merely unspecified. Left null, the CURLOPT_POST below arms libcurl's
+        // read callback, and the DEFAULT read callback reads the process's own
+        // stdin — so `PHPImpersonate::post($url)` with no data sent whatever had
+        // been piped into the caller as the request body. Worse, when stdin is a
+        // pipe that stays open the transfer blocks inside that callback before it
+        // ever starts, where CURLOPT_TIMEOUT_MS cannot interrupt it, and the call
+        // hangs indefinitely. Declaring the size below is what says "zero bytes".
+        if ($method === 'POST' && $body === null) {
+            $body = '';
+        }
+
         if ($body !== null) {
             // Set the exact size first so binary bodies (with embedded NUL bytes)
             // are sent verbatim instead of being cut at the first NUL by strlen();
@@ -295,8 +307,8 @@ final class CurlImpersonate
             // 301/302/303 libcurl does what browsers do — switch to GET and drop
             // the body — while the pinned string keeps saying POST. The result
             // was the worst of both: a POST carrying no body at all.
-            // CURLOPT_POST also covers the bodyless case, which COPYPOSTFIELDS
-            // above does not reach.
+            // The body — empty or not — has already been declared above, so this
+            // only settles the verb; on its own it would arm the read callback.
             $this->ffi->curl_easy_setopt($h, self::CURLOPT_POST, 1);
 
             return;

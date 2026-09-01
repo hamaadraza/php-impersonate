@@ -23,6 +23,15 @@ final class CurlProcess
     private const PROCESS_TIMEOUT_BUFFER = 5;
 
     /**
+     * curl's exit code for CURLE_TOO_MANY_REDIRECTS, the one failure that still
+     * yields a usable response: the final reply was received in full, only the
+     * chain was cut short. The FFI engine returns it rather than throwing
+     * ({@see \Raza\PHPImpersonate\Ffi\CurlImpersonate::request()}), so this
+     * engine must too.
+     */
+    private const CURL_EXIT_TOO_MANY_REDIRECTS = 47;
+
+    /**
      * Options whose value can carry a credential, and so must never become an
      * argv entry. `proxy` counts because a proxy URL can embed `user:password`.
      *
@@ -784,10 +793,18 @@ final class CurlProcess
         $lastLine = $outputLines === [] ? '' : trim((string) end($outputLines));
         $statusCode = is_numeric($lastLine) ? $lastLine : '0';
 
-        // $statusCode is always a numeric string here; only the range needs checking.
-        $hasValidStatusCode = (int) $statusCode >= 100 && (int) $statusCode < 600;
-
-        if ($exitCode !== 0 && ! $hasValidStatusCode) {
+        // Any failed transfer is an error, with the single carve-out the FFI
+        // engine makes (see CurlImpersonate::request()), so both engines answer
+        // one identical network event the same way.
+        //
+        // Excusing instead every failure that merely HAD a status code was worse
+        // than it looks: `-w '%{http_code}'` prints the status curl already
+        // received, so a transfer that broke AFTER the response line still
+        // reported one. A partial file (18), a timeout mid-body (28), a receive
+        // error (56) or an HTTP/2 stream error (92) therefore came back as an
+        // ordinary 200 carrying a silently truncated body — which a caller
+        // persists as real data, while the FFI engine threw for the same bytes.
+        if ($exitCode !== 0 && $exitCode !== self::CURL_EXIT_TOO_MANY_REDIRECTS) {
             $allOutput = array_merge($outputLines, $errorLines);
             $errorMessage = implode("\n", $allOutput);
 

@@ -103,5 +103,77 @@ final class CurlOptions
                 implode(', ', self::allowedKeys())
             ));
         }
+
+        foreach ($curlOptions as $key => $value) {
+            if ($value === null || is_scalar($value)) {
+                continue;
+            }
+
+            throw new InvalidArgumentException(sprintf(
+                'Invalid value for curl option "%s": expected a scalar, %s given.',
+                $key,
+                get_debug_type($value)
+            ));
+        }
+
+        foreach ($curlOptions as $key => $value) {
+            if (self::type($key) === self::TYPE_LONG && $value !== null && ! is_numeric($value)) {
+                throw new InvalidArgumentException(sprintf(
+                    'Invalid value for curl option "%s": expected a number, %s given.',
+                    $key,
+                    var_export($value, true)
+                ));
+            }
+        }
+    }
+
+    /**
+     * Canonicalise validated options into the exact value shape both engines apply.
+     *
+     * Bool options collapse to `true` (or vanish), long options become ints and
+     * string options non-empty strings. Both engines must consume the result of
+     * this, because a loose value otherwise means opposite things on each:
+     * `['insecure' => 'no']` reads as "off" through {@see isEnabled()} on the FFI
+     * engine, while the executable engine would render it as `--insecure no`,
+     * which both enables the flag and hands curl `no` as an extra URL to fetch.
+     *
+     * @param array<string,mixed> $curlOptions Already checked by {@see assertAllowed()}.
+     * @return array<string,bool|int|string>
+     */
+    public static function normalize(array $curlOptions): array
+    {
+        $normalized = [];
+
+        foreach ($curlOptions as $key => $value) {
+            if (! self::isAllowed($key) || $value === null) {
+                continue;
+            }
+
+            switch (self::type($key)) {
+                case self::TYPE_BOOL:
+                    // Drop rather than emit `false`: an absent flag is how both
+                    // engines express "off", and nothing reaches the wire.
+                    if (self::isEnabled($value)) {
+                        $normalized[$key] = true;
+                    }
+
+                    break;
+
+                case self::TYPE_LONG:
+                    $normalized[$key] = (int) $value;
+
+                    break;
+
+                case self::TYPE_STRING:
+                    $string = (string) $value;
+                    if ($string !== '') {
+                        $normalized[$key] = $string;
+                    }
+
+                    break;
+            }
+        }
+
+        return $normalized;
     }
 }

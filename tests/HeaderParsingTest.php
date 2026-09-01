@@ -23,6 +23,11 @@ class HeaderParsingTest extends TestCase
         return ResponseHeaderParser::parse($content);
     }
 
+    private function statusLine(string $content): ?string
+    {
+        return ResponseHeaderParser::statusLine($content);
+    }
+
     // -------------------------------------------------------------------------
     // Empty / blank input
     // -------------------------------------------------------------------------
@@ -71,27 +76,34 @@ class HeaderParsingTest extends TestCase
     // HTTP status line
     // -------------------------------------------------------------------------
 
-    public function testHttpStatusLineIsCapturedUnderHttpStatusKey(): void
+    public function testHttpStatusLineIsReturnedSeparately(): void
     {
-        $result = $this->parseHeaders("HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\n");
+        $raw = "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\n";
 
-        $this->assertArrayHasKey('HTTP_STATUS', $result);
-        $this->assertSame(['HTTP/1.1 200 OK'], $result['HTTP_STATUS']);
+        $this->assertSame('HTTP/1.1 200 OK', $this->statusLine($raw));
     }
 
     public function testHttp2StatusLineIsCaptured(): void
     {
-        $result = $this->parseHeaders("HTTP/2 200\r\nContent-Type: application/json\r\n");
+        $raw = "HTTP/2 200\r\nContent-Type: application/json\r\n";
 
-        $this->assertArrayHasKey('HTTP_STATUS', $result);
-        $this->assertSame(['HTTP/2 200'], $result['HTTP_STATUS']);
+        $this->assertSame('HTTP/2 200', $this->statusLine($raw));
     }
 
-    public function testHttpStatusLineIsStoredAsSingleElementArray(): void
+    public function testStatusLineIsNotExposedAsAHeader(): void
     {
-        $result = $this->parseHeaders("HTTP/1.1 404 Not Found\r\n");
+        // It was never on the wire as a header, so callers iterating headers()
+        // must not have to filter out a synthetic entry.
+        $result = $this->parseHeaders("HTTP/1.1 404 Not Found\r\nContent-Type: text/plain\r\n");
 
-        $this->assertCount(1, $result['HTTP_STATUS']);
+        $this->assertArrayNotHasKey('HTTP_STATUS', $result);
+        $this->assertSame(['Content-Type'], array_keys($result));
+    }
+
+    public function testStatusLineIsNullWhenAbsent(): void
+    {
+        $this->assertNull($this->statusLine("Content-Type: text/plain\r\n"));
+        $this->assertNull($this->statusLine(''));
     }
 
     // -------------------------------------------------------------------------
@@ -189,7 +201,7 @@ class HeaderParsingTest extends TestCase
         $result = $this->parseHeaders($raw);
 
         // Status from final section only
-        $this->assertSame(['HTTP/1.1 200 OK'], $result['HTTP_STATUS']);
+        $this->assertSame('HTTP/1.1 200 OK', $this->statusLine($raw));
 
         // Cookies from final section only
         $this->assertCount(1, $result['Set-Cookie']);
@@ -215,7 +227,7 @@ class HeaderParsingTest extends TestCase
 
         $result = $this->parseHeaders($raw);
 
-        $this->assertSame(['HTTP/1.1 200 OK'], $result['HTTP_STATUS']);
+        $this->assertSame('HTTP/1.1 200 OK', $this->statusLine($raw));
         $this->assertArrayNotHasKey('Location', $result);
     }
 

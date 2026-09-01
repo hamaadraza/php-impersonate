@@ -3,6 +3,7 @@
 namespace Raza\PHPImpersonate\Ffi;
 
 use FFI;
+use Raza\PHPImpersonate\Support\CaBundle;
 use Raza\PHPImpersonate\Support\CurlOptions;
 use Raza\PHPImpersonate\Platform\PlatformDetector;
 use Raza\PHPImpersonate\Exception\RequestException;
@@ -123,6 +124,11 @@ final class CurlImpersonate
     ): array {
         $ffi = $this->ffi;
         $h = $this->handle;
+
+        // Canonicalise to the same value shape the executable engine applies, so
+        // a loose value (e.g. 'insecure' => 'no') can never mean one thing here
+        // and the opposite there. Idempotent — callers normally pre-normalise.
+        $curlOptions = CurlOptions::normalize($curlOptions);
 
         // Reset per request but keep the connection cache on this handle.
         $ffi->curl_easy_reset($h);
@@ -336,9 +342,14 @@ final class CurlImpersonate
 
         // POSIX-only engine (see isSupported()), so a CA bundle path is always
         // the right mechanism; BoringSSL does not auto-discover the trust store.
-        $ca = \Raza\PHPImpersonate\Support\CaBundle::path();
+        $ca = CaBundle::path();
         if ($ca !== null) {
             $this->ffi->curl_easy_setopt($h, self::CURLOPT_CAINFO, $ca);
+        }
+
+        $caDir = CaBundle::directory();
+        if ($caDir !== null) {
+            $this->ffi->curl_easy_setopt($h, CurlOptions::CURLOPT_CAPATH, $caDir);
         }
     }
 

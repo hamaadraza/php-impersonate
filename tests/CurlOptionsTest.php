@@ -5,6 +5,7 @@ namespace Raza\PHPImpersonate\Tests;
 use InvalidArgumentException;
 use PHPUnit\Framework\TestCase;
 use Raza\PHPImpersonate\Support\CurlOptions;
+use PHPUnit\Framework\Attributes\DataProvider;
 
 /**
  * The shared, typed curl-option allow-list used by both engines. Pure unit
@@ -74,11 +75,86 @@ class CurlOptionsTest extends TestCase
         ];
     }
 
-    /**
-     * @dataProvider boolProvider
-     */
+    #[DataProvider('boolProvider')]
     public function testIsEnabledMatchesCurlSemantics(mixed $value, bool $expected): void
     {
         $this->assertSame($expected, CurlOptions::isEnabled($value));
+    }
+
+    // -------------------------------------------------------------------------
+    // normalize() — the shared canonical value shape both engines apply
+    // -------------------------------------------------------------------------
+
+    /**
+     * A bool option collapses to `true` or vanishes; it must NEVER keep a loose
+     * value. The executable engine renders any non-bool as `--flag value`, and
+     * curl reads that trailing value as an extra URL to fetch.
+     */
+    public function testNormalizeCollapsesBoolOptions(): void
+    {
+        $this->assertSame(['insecure' => true], CurlOptions::normalize(['insecure' => 'yes']));
+        $this->assertSame(['insecure' => true], CurlOptions::normalize(['insecure' => 1]));
+        $this->assertSame(['insecure' => true], CurlOptions::normalize(['insecure' => true]));
+
+        // Disabled means absent, not `false`: an absent flag is how both engines
+        // express "off", and nothing reaches the wire.
+        $this->assertSame([], CurlOptions::normalize(['insecure' => 'no']));
+        $this->assertSame([], CurlOptions::normalize(['insecure' => '0']));
+        $this->assertSame([], CurlOptions::normalize(['insecure' => false]));
+    }
+
+    public function testNormalizeCastsLongOptionsToInt(): void
+    {
+        $this->assertSame(['max-redirs' => 5], CurlOptions::normalize(['max-redirs' => '5']));
+        $this->assertSame(['max-redirs' => 0], CurlOptions::normalize(['max-redirs' => 0]));
+    }
+
+    public function testNormalizeDropsNullAndEmptyStrings(): void
+    {
+        // An empty proxy/cacert is "unset", and must not suppress the default CA
+        // bundle or emit an empty argument.
+        $this->assertSame([], CurlOptions::normalize(['proxy' => '', 'cacert' => null]));
+        $this->assertSame(['proxy' => 'http://p:1'], CurlOptions::normalize(['proxy' => 'http://p:1']));
+    }
+
+    public function testNormalizeIsIdempotent(): void
+    {
+        $once = CurlOptions::normalize(['insecure' => 'yes', 'max-redirs' => '3', 'proxy' => 'http://p:1']);
+
+        $this->assertSame($once, CurlOptions::normalize($once));
+    }
+
+    public function testNormalizeSkipsUnknownKeys(): void
+    {
+        $this->assertSame(['proxy' => 'http://p:1'], CurlOptions::normalize([
+            'proxy' => 'http://p:1',
+            'ciphers' => 'AES',
+        ]));
+    }
+
+    // -------------------------------------------------------------------------
+    // assertAllowed() — value validation
+    // -------------------------------------------------------------------------
+
+    public function testAssertAllowedRejectsNonScalarValues(): void
+    {
+        $this->expectException(InvalidArgumentException::class);
+        $this->expectExceptionMessage('expected a scalar');
+
+        CurlOptions::assertAllowed(['proxy' => ['http://p:1']]);
+    }
+
+    public function testAssertAllowedRejectsNonNumericLongValues(): void
+    {
+        $this->expectException(InvalidArgumentException::class);
+        $this->expectExceptionMessage('expected a number');
+
+        CurlOptions::assertAllowed(['max-redirs' => 'many']);
+    }
+
+    public function testAssertAllowedAcceptsNumericStringForLongOptions(): void
+    {
+        CurlOptions::assertAllowed(['max-redirs' => '10']);
+        $this->addToAssertionCount(1);
     }
 }

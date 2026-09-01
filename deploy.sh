@@ -42,43 +42,24 @@ if git tag -l | grep -q "^v$VERSION$"; then
     exit 1
 fi
 
-echo "📝 Updating composer.json version to $VERSION"
-
-# Update version in composer.json using jq if available, otherwise use sed
-if command -v jq >/dev/null 2>&1; then
-    # Use jq for more reliable JSON manipulation
-    jq --arg version "$VERSION" '.version = $version' composer.json > composer.json.tmp && mv composer.json.tmp composer.json
-    echo "✅ Updated composer.json using jq"
-else
-    # Fallback to sed (less reliable but works for simple cases)
-    sed -i "s/\"version\": \"[^\"]*\"/\"version\": \"$VERSION\"/" composer.json
-    echo "✅ Updated composer.json using sed"
-fi
-
-# Verify the version was updated correctly
-ACTUAL_VERSION=$(grep '"version"' composer.json | sed 's/.*"version": "\([^"]*\)".*/\1/')
-if [ "$ACTUAL_VERSION" != "$VERSION" ]; then
-    echo "Error: Failed to update version in composer.json. Expected: $VERSION, Got: $ACTUAL_VERSION"
+# The package version is NOT stored in composer.json: Packagist derives it from
+# the git tag, and a hardcoded field silently drifts out of sync with reality
+# (composer validate warns about it too). The tag below is the single source of
+# truth for the released version.
+if grep -q '"version"' composer.json; then
+    echo "Error: composer.json declares a \"version\" field. Remove it — the git tag is the source of truth."
     exit 1
 fi
-
-echo "✅ Version updated successfully in composer.json"
-
-# Commit the version change
-echo "📦 Committing version change"
-git add composer.json
-git commit -m "chore: bump version to $VERSION"
 
 # Create and push tag
 echo "🏷️  Creating git tag v$VERSION"
 git tag -a "v$VERSION" -m "Release version $VERSION"
 
-echo "📤 Pushing changes and tag to origin"
+echo "📤 Pushing tag to origin"
 git push origin main
 git push origin "v$VERSION"
 
 echo "🎉 Deployment completed successfully!"
 echo "📋 Summary:"
-echo "   - Version updated to $VERSION in composer.json"
-echo "   - Changes committed and pushed to main"
 echo "   - Tag v$VERSION created and pushed to origin"
+echo "   - Packagist will pick up v$VERSION from the tag"

@@ -9,7 +9,6 @@ class Configuration
     private static array $platformConfigs = [
         PlatformDetector::PLATFORM_LINUX => [
             'file_extension' => '',
-            'command_separator' => '\\',
             'path_separator' => '/',
             'executable_check' => 'is_executable',
             'which_command' => 'which',
@@ -17,7 +16,6 @@ class Configuration
         ],
         PlatformDetector::PLATFORM_WINDOWS => [
             'file_extension' => '.exe',
-            'command_separator' => '^',
             'path_separator' => '\\',
             'executable_check' => 'file_exists', // Windows doesn't have is_executable
             'which_command' => 'where',
@@ -25,7 +23,6 @@ class Configuration
         ],
         PlatformDetector::PLATFORM_MACOS => [
             'file_extension' => '',
-            'command_separator' => '\\',
             'path_separator' => '/',
             'executable_check' => 'is_executable',
             'which_command' => 'which',

@@ -108,30 +108,56 @@ final class RequestPreparer
 
     /**
      * Normalise a headers array: accept both "Name" => "Value" and the
-     * "Name: Value" list form, dropping malformed entries.
+     * "Name: Value" list form.
+     *
+     * Malformed entries are rejected rather than dropped. Silently discarding
+     * them meant a typo'd header simply never reached the wire, with nothing to
+     * show for it — and it sat oddly beside {@see assertHeaderIsSafe()}, which
+     * throws. Both now fail loudly.
      *
      * @param array<int|string,mixed> $headers
      * @return array<string,string>
+     * @throws InvalidArgumentException
      */
     public static function normalizeHeaders(array $headers): array
     {
         $normalized = [];
 
         foreach ($headers as $key => $value) {
-            if (is_int($key) && is_string($value)) {
-                // Handle "Header: Value" format
-                $colonPos = strpos($value, ':');
-                if ($colonPos !== false) {
-                    $headerName = trim(substr($value, 0, $colonPos));
-                    $headerValue = trim(substr($value, $colonPos + 1));
-
-                    if (! empty($headerName)) {
-                        $normalized[$headerName] = $headerValue;
-                    }
+            if (is_int($key)) {
+                // List form: a single "Header: Value" string.
+                if (! is_string($value)) {
+                    throw new InvalidArgumentException(sprintf(
+                        'Invalid header at index %d: list-form entries must be "Name: Value" strings, %s given',
+                        $key,
+                        get_debug_type($value)
+                    ));
                 }
-            } elseif (is_string($key) && (is_string($value) || is_numeric($value))) {
-                $normalized[$key] = (string)$value;
+
+                $colonPos = strpos($value, ':');
+                $headerName = $colonPos === false ? '' : trim(substr($value, 0, $colonPos));
+
+                if ($headerName === '') {
+                    throw new InvalidArgumentException(sprintf(
+                        'Invalid header "%s": list-form entries must be "Name: Value" with a non-empty name',
+                        $value
+                    ));
+                }
+
+                $normalized[$headerName] = trim(substr($value, $colonPos + 1));
+
+                continue;
             }
+
+            if (! is_string($value) && ! is_numeric($value)) {
+                throw new InvalidArgumentException(sprintf(
+                    'Invalid value for header "%s": expected a string or number, %s given',
+                    $key,
+                    get_debug_type($value)
+                ));
+            }
+
+            $normalized[$key] = (string)$value;
         }
 
         return $normalized;

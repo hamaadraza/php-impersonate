@@ -11,12 +11,6 @@ parameters:
         -
             identifier: property.notFound
             path: src/Ffi/CurlImpersonate.php
-        # Defensive guards against a false return. On PHP 8 these escaping
-        # functions are typed to return string, but the checks document intent
-        # and cost nothing; they live only in the deprecated string-command path.
-        -
-            identifier: identical.alwaysFalse
-            path: src/Platform/CommandBuilder.php
         # findHeaderValue() accepts external header arrays whose keys may be ints
         # at runtime despite the string-keyed phpdoc; the is_string() guard stays.
         -

@@ -293,6 +293,26 @@ foreach ($response->headers() as $name => $values) {
 }
 ```
 
+`headers()` contains only headers that were on the wire — the status line is not
+mixed in; read it with `$response->status()`.
+
+### Overriding a profile header
+
+A header you pass **replaces** the browser profile's header of the same name
+(matched case-insensitively) rather than being sent alongside it. This is how
+you change the `User-Agent` without breaking the TLS fingerprint:
+
+```php
+$response = PHPImpersonate::get('https://example.com', [
+    'User-Agent' => 'MyApp/1.0',   // replaces the profile's User-Agent
+    'X-Request-Id' => 'abc123',    // added to it
+]);
+```
+
+> [!NOTE]
+> Malformed headers are rejected with an `InvalidArgumentException` rather than
+> silently dropped, so a typo cannot leave a header quietly unsent.
+
 ## Browsers
 
 Pass any of these names as the `$browser` argument (default **`firefox147`**):
@@ -354,7 +374,14 @@ $response = $client->sendGet('https://api.ipify.org?format=json');
 > alter the browser fingerprint — `ciphers`, `curves`, `tls-*`, the HTTP version,
 > `user-agent` — are intentionally **not** configurable: overriding them would
 > silently defeat the impersonation. Set a custom `User-Agent` as a request
-> header instead.
+> header instead — it replaces the profile's, see
+> [Overriding a profile header](#overriding-a-profile-header).
+
+> [!TIP]
+> Without an explicit `cacert`/`capath`, the CA bundle is taken from
+> `CURL_CA_BUNDLE`, then `SSL_CERT_FILE`, then the usual system locations
+> (`SSL_CERT_DIR` supplies a CA directory). Setting one of those variables
+> overrides the system bundle on both engines.
 
 ## Request bodies
 

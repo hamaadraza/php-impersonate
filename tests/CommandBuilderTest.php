@@ -2,222 +2,169 @@
 
 namespace Raza\PHPImpersonate\Tests;
 
-use RuntimeException;
 use InvalidArgumentException;
 use PHPUnit\Framework\TestCase;
 use PHPUnit\Framework\Attributes\DataProvider;
 use Raza\PHPImpersonate\Platform\CommandBuilder;
-use Raza\PHPImpersonate\Platform\PlatformDetector;
 
+/**
+ * CommandBuilder builds argv arrays for proc_open()'s array mode, which
+ * executes the program directly with no shell involved. The assertions here are
+ * therefore about argv structure — flag/value pairing, prefixes, ordering — and
+ * emphatically NOT about quoting: values must arrive verbatim, because any
+ * escaping applied here would be sent literally to the program.
+ */
 class CommandBuilderTest extends TestCase
 {
-    protected function setUp(): void
+    /**
+     * Index of $needle in $args, or null when absent.
+     *
+     * @param list<string> $args
+     */
+    private function indexOf(array $args, string $needle): ?int
     {
-        parent::setUp();
+        $index = array_search($needle, $args, true);
 
-        // Mock PlatformDetector if needed for consistent testing
-        // This assumes PlatformDetector has methods that can be mocked
+        return $index === false ? null : (int) $index;
     }
 
     /**
-     * Test basic generic command building
+     * The value argv carries immediately after $flag.
+     *
+     * @param list<string> $args
      */
+    private function valueAfter(array $args, string $flag): ?string
+    {
+        $index = $this->indexOf($args, $flag);
+
+        return $index === null ? null : ($args[$index + 1] ?? null);
+    }
+
+    // -------------------------------------------------------------------------
+    // Basic building
+    // -------------------------------------------------------------------------
+
     public function testBasicGenericCommandBuilding(): void
     {
-        $cmd = CommandBuilder::buildCommand('test-command', ['arg1', 'arg2'], [
+        $args = CommandBuilder::buildCommandArgs('test-command', ['arg1', 'arg2'], [
             'verbose' => true,
             'output' => 'file.txt',
             'config' => 'config.json',
         ]);
 
-        $this->assertIsString($cmd);
-        $this->assertStringContainsString('test-command', $cmd);
-        $this->assertStringContainsString('--verbose', $cmd);
-        $this->assertStringContainsString('--output', $cmd);
-        $this->assertStringContainsString('--config', $cmd);
+        $this->assertSame('test-command', $args[0]);
+        $this->assertContains('--verbose', $args);
+        $this->assertSame('file.txt', $this->valueAfter($args, '--output'));
+        $this->assertSame('config.json', $this->valueAfter($args, '--config'));
 
-        // Platform-specific quote checking
-        if (PlatformDetector::isWindows()) {
-            $this->assertStringContainsString('"arg1"', $cmd);
-            $this->assertStringContainsString('"arg2"', $cmd);
-        } else {
-            $this->assertStringContainsString("'arg1'", $cmd);
-            $this->assertStringContainsString("'arg2'", $cmd);
-        }
+        // Positional arguments are appended last, unquoted and in order.
+        $this->assertSame(['arg1', 'arg2'], array_slice($args, -2));
     }
 
-    /**
-     * Test curl-specific command building
-     */
     public function testCurlCommandBuilding(): void
     {
-        $cmd = CommandBuilder::buildCurlCommand('curl', ['https://example.com'], [
-            's' => true, // silent mode (single letter)
-            'L' => true, // follow redirects (single letter)
-            'max-time' => 30, // long option
-            'H' => ['Content-Type: application/json', 'Authorization: Bearer token'], // multiple headers
+        $args = CommandBuilder::buildCurlCommandArgs('curl', ['https://example.com'], [
+            's' => true,
+            'L' => true,
+            'max-time' => 30,
+            'H' => ['Content-Type: application/json', 'Authorization: Bearer token'],
             'data' => '{"key":"value"}',
         ]);
 
-        $this->assertIsString($cmd);
-        $this->assertStringContainsString('curl', $cmd);
-        $this->assertStringContainsString(' -s', $cmd); // single letter option
-        $this->assertStringContainsString(' -L', $cmd); // single letter option
-        $this->assertStringContainsString('--max-time', $cmd); // long option
-        $this->assertStringContainsString(' -H', $cmd); // header option (single letter)
-        $this->assertStringContainsString('--data', $cmd); // data option (long option)
+        $this->assertSame('curl', $args[0]);
+        $this->assertContains('-s', $args);
+        $this->assertContains('-L', $args);
+        $this->assertSame('30', $this->valueAfter($args, '--max-time'));
+        $this->assertSame('{"key":"value"}', $this->valueAfter($args, '--data'));
+        $this->assertSame('https://example.com', end($args));
 
-        // Platform-specific quote checking
-        if (PlatformDetector::isWindows()) {
-            $this->assertStringContainsString('"https://example.com"', $cmd);
-        } else {
-            $this->assertStringContainsString("'https://example.com'", $cmd);
-        }
+        $this->assertContains('Content-Type: application/json', $args);
+        $this->assertContains('Authorization: Bearer token', $args);
     }
 
-    /**
-     * Test curl command with mixed option types
-     */
-    public function testCurlCommandWithMixedOptions(): void
+    public function testCurlCommandWithMixedOptionTypes(): void
     {
-        $cmd = CommandBuilder::buildCurlCommand('curl-impersonate-chrome', ['https://api.example.com'], [
-            's' => true, // single letter boolean
-            'verbose' => true, // long boolean
-            'w' => '%{http_code}', // single letter with value
-            'max-time' => 30, // long option with value
-            'user-agent' => 'TestAgent/1.0', // long option with spaces in value
+        $args = CommandBuilder::buildCurlCommandArgs('curl-impersonate', ['https://api.example.com'], [
+            's' => true,
+            'verbose' => true,
+            'w' => '%{http_code}',
+            'max-time' => 30,
+            'user-agent' => 'TestAgent/1.0',
         ]);
 
-        $this->assertStringContainsString(' -s', $cmd);
-        $this->assertStringContainsString('--verbose', $cmd);
-        $this->assertStringContainsString(' -w', $cmd);
-
-        // Platform-specific quote checking
-        if (PlatformDetector::isWindows()) {
-            $this->assertStringContainsString('"%{http_code}"', $cmd);
-            $this->assertStringContainsString('"30"', $cmd);
-            $this->assertStringContainsString('"TestAgent/1.0"', $cmd);
-        } else {
-            $this->assertStringContainsString("'%{http_code}'", $cmd);
-            $this->assertStringContainsString("'30'", $cmd);
-            $this->assertStringContainsString("'TestAgent/1.0'", $cmd);
-        }
-
-        $this->assertStringContainsString('--max-time', $cmd);
-        $this->assertStringContainsString('--user-agent', $cmd);
+        $this->assertContains('-s', $args);
+        $this->assertContains('--verbose', $args);
+        $this->assertSame('%{http_code}', $this->valueAfter($args, '-w'));
+        $this->assertSame('30', $this->valueAfter($args, '--max-time'));
+        $this->assertSame('TestAgent/1.0', $this->valueAfter($args, '--user-agent'));
     }
 
-    /**
-     * Test array options (multiple values for same option)
-     */
-    public function testArrayOptionsHandling(): void
+    // -------------------------------------------------------------------------
+    // Option shapes
+    // -------------------------------------------------------------------------
+
+    public function testArrayOptionRepeatsTheFlagPerValue(): void
     {
         $headers = ['Content-Type: application/json', 'Authorization: Bearer token123'];
 
-        $cmd = CommandBuilder::buildCommand('test-command', [], [
+        $args = CommandBuilder::buildCommandArgs('test-command', [], [
             'header' => $headers,
             'config' => ['config1.json', 'config2.json'],
         ]);
 
-        // Should contain multiple instances of the same option
-        $headerCount = substr_count($cmd, '--header');
-        $this->assertEquals(2, $headerCount);
-
-        $configCount = substr_count($cmd, '--config');
-        $this->assertEquals(2, $configCount);
+        $this->assertSame(2, count(array_keys($args, '--header', true)));
+        $this->assertSame(2, count(array_keys($args, '--config', true)));
 
         foreach ($headers as $header) {
-            $this->assertStringContainsString($header, $cmd);
+            $this->assertContains($header, $args);
         }
     }
 
     /**
-     * Test boolean options handling
+     * @param array<string,mixed> $options
+     * @param list<string> $expectedPresent
+     * @param list<string> $expectedAbsent
      */
     #[DataProvider('booleanOptionsProvider')]
     public function testBooleanOptionsHandling(array $options, array $expectedPresent, array $expectedAbsent): void
     {
-        $cmd = CommandBuilder::buildCommand('test-command', [], $options);
+        $args = CommandBuilder::buildCommandArgs('test-command', [], $options);
 
-        foreach ($expectedPresent as $option) {
-            $this->assertStringContainsString("--$option", $cmd, "Option --$option should be present");
+        foreach ($expectedPresent as $flag) {
+            $this->assertContains("--$flag", $args);
         }
-
-        foreach ($expectedAbsent as $option) {
-            $this->assertStringNotContainsString("--$option", $cmd, "Option --$option should not be present");
+        foreach ($expectedAbsent as $flag) {
+            $this->assertNotContains("--$flag", $args);
         }
     }
 
+    /**
+     * @return array<string, array{0: array<string,mixed>, 1: list<string>, 2: list<string>}>
+     */
     public static function booleanOptionsProvider(): array
     {
         return [
-            'mixed boolean options' => [
-                'options' => [
-                    'verbose' => true,
-                    'quiet' => false,
-                    'debug' => true,
-                    'force' => false,
-                ],
-                'expectedPresent' => ['verbose', 'debug'],
-                'expectedAbsent' => ['quiet', 'force'],
+            'mixed options' => [
+                ['verbose' => true, 'quiet' => false, 'debug' => true, 'force' => false],
+                ['verbose', 'debug'],
+                ['quiet', 'force'],
             ],
             'all true options' => [
-                'options' => [
-                    'help' => true,
-                    'version' => true,
-                ],
-                'expectedPresent' => ['help', 'version'],
-                'expectedAbsent' => [],
+                ['help' => true, 'version' => true],
+                ['help', 'version'],
+                [],
             ],
             'all false options' => [
-                'options' => [
-                    'quiet' => false,
-                    'silent' => false,
-                ],
-                'expectedPresent' => [],
-                'expectedAbsent' => ['quiet', 'silent'],
+                ['quiet' => false, 'silent' => false],
+                [],
+                ['quiet', 'silent'],
             ],
         ];
     }
 
-    /**
-     * Test special characters and escaping
-     */
-    #[DataProvider('specialCharactersProvider')]
-    public function testSpecialCharactersEscaping(string $input, string $description): void
-    {
-        $cmd = CommandBuilder::buildCommand('test', [$input], ['option' => $input]);
-
-        // Command should be built without throwing exceptions
-        $this->assertIsString($cmd, "Failed to build command with $description");
-        $this->assertStringContainsString('test', $cmd);
-    }
-
-    public static function specialCharactersProvider(): array
-    {
-        return [
-            ["Hello World", "spaces"],
-            ["file with 'quotes'", "single quotes"],
-            ['file with "quotes"', "double quotes"],
-            ["file;with;semicolons", "semicolons"],
-            ["file|with|pipes", "pipes"],
-            ["file&with&ampersands", "ampersands"],
-            ["file\$with\$dollars", "dollar signs"],
-            ["file`with`backticks", "backticks"],
-            ["file(with)parens", "parentheses"],
-            ["file[with]brackets", "square brackets"],
-            ["file{with}braces", "curly braces"],
-            ["file with\ttabs", "tabs"],
-            ["file with\nnewlines", "newlines"],
-        ];
-    }
-
-    /**
-     * Test empty and null value handling
-     */
     public function testEmptyAndNullValueHandling(): void
     {
-        $cmd = CommandBuilder::buildCommand('test-command', [null, '', 'valid'], [
+        $args = CommandBuilder::buildCommandArgs('test-command', [null, '', 'valid'], [
             'empty' => '',
             'null' => null,
             'zero' => 0,
@@ -225,91 +172,34 @@ class CommandBuilderTest extends TestCase
             'valid' => 'value',
         ]);
 
-        // Should handle various empty/null values gracefully
-        $this->assertIsString($cmd);
-        $this->assertStringContainsString('test-command', $cmd);
-        $this->assertStringContainsString('--empty', $cmd); // Empty string should still create option
-        $this->assertStringNotContainsString('--null', $cmd); // null should be skipped
-        $this->assertStringContainsString('--zero', $cmd); // 0 should be included
-        $this->assertStringNotContainsString('--false', $cmd); // false should be skipped
-        $this->assertStringContainsString('--valid', $cmd);
+        $this->assertSame('test-command', $args[0]);
+        $this->assertSame('', $this->valueAfter($args, '--empty'));  // empty string is still a value
+        $this->assertNotContains('--null', $args);                   // null is skipped
+        $this->assertSame('0', $this->valueAfter($args, '--zero'));  // 0 is a real value, not "off"
+        $this->assertNotContains('--false', $args);                  // false means "flag absent"
+        $this->assertSame('value', $this->valueAfter($args, '--valid'));
+
+        // The null positional is skipped; '' and 'valid' survive.
+        $this->assertSame(['', 'valid'], array_slice($args, -2));
     }
 
     /**
-     * Test input validation
-     */
-    public function testEmptyExecutableThrowsException(): void
-    {
-        $this->expectException(InvalidArgumentException::class);
-        $this->expectExceptionMessage('Executable cannot be empty');
-
-        CommandBuilder::buildCommand('', ['arg']);
-    }
-
-    public function testWhitespaceOnlyExecutableThrowsException(): void
-    {
-        $this->expectException(InvalidArgumentException::class);
-        $this->expectExceptionMessage('Executable cannot be empty');
-
-        CommandBuilder::buildCommand('   ', ['arg']);
-    }
-
-    public function testInvalidCommandTypeThrowsException(): void
-    {
-        $this->expectException(InvalidArgumentException::class);
-        $this->expectExceptionMessage('Invalid command type');
-
-        CommandBuilder::buildCommand('test', [], [], 'invalid_type');
-    }
-
-    /**
-     * Test path escaping functionality
-     */
-    #[DataProvider('pathEscapingProvider')]
-    public function testPathEscaping(string $input, string $description): void
-    {
-        $escapedPath = CommandBuilder::escapePath($input);
-
-        $this->assertIsString($escapedPath, "Path escaping failed for $description");
-        $this->assertNotEmpty($escapedPath, "Escaped path should not be empty for $description");
-    }
-
-    public static function pathEscapingProvider(): array
-    {
-        return [
-            ['/simple/unix/path', 'simple Unix path'],
-            ['/path/with spaces/file.txt', 'Unix path with spaces'],
-            ['/path/with/special&chars$/file.txt', 'Unix path with special characters'],
-            ['C:\\Windows\\System32', 'Windows path'],
-            ['C:\\Program Files\\Application', 'Windows path with spaces'],
-            ['\\\\server\\share\\file.txt', 'UNC path'],
-            ['relative/path/file.txt', 'relative path'],
-        ];
-    }
-
-    /**
-     * Test empty path handling
-     */
-    public function testEmptyPathEscaping(): void
-    {
-        $escapedPath = CommandBuilder::escapePath('');
-
-        $this->assertIsString($escapedPath, "Empty path escaping failed");
-        $this->assertEquals('', $escapedPath, "Empty path should return empty string");
-    }
-
-    /**
-     * Test command building with different argument types
+     * @param list<mixed> $arguments
      */
     #[DataProvider('argumentTypesProvider')]
-    public function testDifferentArgumentTypes(array $args, string $description): void
+    public function testDifferentArgumentTypes(array $arguments, string $description): void
     {
-        $cmd = CommandBuilder::buildCommand('test-cmd', $args);
+        $args = CommandBuilder::buildCommandArgs('test-cmd', $arguments);
 
-        $this->assertIsString($cmd, "Command building failed for $description");
-        $this->assertStringContainsString('test-cmd', $cmd);
+        $this->assertSame('test-cmd', $args[0], "Command building failed for $description");
+        foreach (array_slice($args, 1) as $arg) {
+            $this->assertIsString($arg, "Every argv entry must be a string for $description");
+        }
     }
 
+    /**
+     * @return array<int, array{0: list<mixed>, 1: string}>
+     */
     public static function argumentTypesProvider(): array
     {
         return [
@@ -324,40 +214,38 @@ class CommandBuilderTest extends TestCase
         ];
     }
 
-    /**
-     * Test curl vs generic command differences
-     */
-    public function testCurlVsGenericCommandDifferences(): void
+    // -------------------------------------------------------------------------
+    // Prefixing rules
+    // -------------------------------------------------------------------------
+
+    public function testCurlUsesSingleDashForSingleLetterOptions(): void
     {
         $options = [
-            's' => true, // single letter
-            'verbose' => true, // long option
-            'H' => 'Content-Type: application/json', // single letter with value
-            'max-time' => 30, // long option with value
+            's' => true,
+            'verbose' => true,
+            'H' => 'Content-Type: application/json',
+            'max-time' => 30,
         ];
 
-        $genericCmd = CommandBuilder::buildCommand('generic-tool', ['arg'], $options, CommandBuilder::TYPE_GENERIC);
-        $curlCmd = CommandBuilder::buildCommand('curl', ['arg'], $options, CommandBuilder::TYPE_CURL);
+        $generic = CommandBuilder::buildCommandArgs('generic-tool', ['arg'], $options, CommandBuilder::TYPE_GENERIC);
+        $curl = CommandBuilder::buildCommandArgs('curl', ['arg'], $options, CommandBuilder::TYPE_CURL);
 
-        // Generic should use -- for all options
-        $this->assertStringContainsString('--s', $genericCmd);
-        $this->assertStringContainsString('--verbose', $genericCmd);
-        $this->assertStringContainsString('--H', $genericCmd);
-        $this->assertStringContainsString('--max-time', $genericCmd);
+        // Generic prefixes everything with --
+        $this->assertContains('--s', $generic);
+        $this->assertContains('--verbose', $generic);
+        $this->assertContains('--H', $generic);
+        $this->assertContains('--max-time', $generic);
 
-        // Curl should use - for single letters, -- for long options
-        $this->assertStringContainsString(' -s', $curlCmd);
-        $this->assertStringContainsString('--verbose', $curlCmd);
-        $this->assertStringContainsString(' -H', $curlCmd);
-        $this->assertStringContainsString('--max-time', $curlCmd);
+        // Curl uses - for single letters, -- for long options
+        $this->assertContains('-s', $curl);
+        $this->assertContains('--verbose', $curl);
+        $this->assertContains('-H', $curl);
+        $this->assertContains('--max-time', $curl);
     }
 
-    /**
-     * Test complex real-world curl command
-     */
     public function testComplexCurlCommand(): void
     {
-        $cmd = CommandBuilder::buildCurlCommand('curl-impersonate-chrome', ['https://api.github.com/user'], [
+        $args = CommandBuilder::buildCurlCommandArgs('curl-impersonate', ['https://api.github.com/user'], [
             's' => true,
             'L' => true,
             'w' => '%{http_code}',
@@ -372,112 +260,118 @@ class CommandBuilderTest extends TestCase
             'location-trusted' => true,
         ]);
 
-        // Verify structure
-        $this->assertStringStartsWith('curl-impersonate-chrome', trim($cmd));
+        $this->assertSame('curl-impersonate', $args[0]);
+        $this->assertSame('https://api.github.com/user', end($args));
 
-        // Platform-specific URL ending check
-        if (PlatformDetector::isWindows()) {
-            $this->assertStringEndsWith('"https://api.github.com/user"', trim($cmd));
-        } else {
-            $this->assertStringEndsWith("'https://api.github.com/user'", trim($cmd));
-        }
+        $this->assertContains('-s', $args);
+        $this->assertContains('-L', $args);
+        $this->assertSame('%{http_code}', $this->valueAfter($args, '-w'));
+        $this->assertContains('--compressed', $args);
+        $this->assertContains('--location-trusted', $args);
 
-        // Verify options are present
-        $this->assertStringContainsString(' -s', $cmd);
-        $this->assertStringContainsString(' -L', $cmd);
-        $this->assertStringContainsString(' -w', $cmd);
-        $this->assertStringContainsString('--max-time', $cmd);
-        $this->assertStringContainsString('--compressed', $cmd);
-        $this->assertStringContainsString('--location-trusted', $cmd);
+        $this->assertSame(3, count(array_keys($args, '-H', true)));
+        $this->assertContains('Accept: application/vnd.github.v3+json', $args);
+        $this->assertContains('Authorization: Bearer ghp_token123', $args);
+        $this->assertContains('User-Agent: MyApp/1.0', $args);
 
-        // Verify headers
-        $this->assertEquals(3, substr_count($cmd, ' -H '));
-        $this->assertStringContainsString('Accept: application/vnd.github.v3+json', $cmd);
-        $this->assertStringContainsString('Authorization: Bearer ghp_token123', $cmd);
-        $this->assertStringContainsString('User-Agent: MyApp/1.0', $cmd);
-
-        // Verify data
-        $this->assertStringContainsString('--data', $cmd);
-
-        // Platform-specific JSON data checking
-        if (PlatformDetector::isWindows()) {
-            $this->assertStringContainsString('"{\\"query\\":\\"user data\\"}"', $cmd);
-        } else {
-            $this->assertStringContainsString('{"query":"user data"}', $cmd);
-        }
+        // JSON must survive verbatim — no escaping, no mangled quotes.
+        $this->assertSame('{"query":"user data"}', $this->valueAfter($args, '--data'));
     }
 
-    /**
-     * Test error handling for failed escaping
-     */
-    public function testErrorHandlingForFailedOperations(): void
+    // -------------------------------------------------------------------------
+    // Validation
+    // -------------------------------------------------------------------------
+
+    public function testEmptyExecutableThrowsException(): void
     {
-        // Test with an extremely long string that might cause issues
-        $veryLongString = str_repeat('a', 1000000); // 1MB string
+        $this->expectException(InvalidArgumentException::class);
+        $this->expectExceptionMessage('Executable cannot be empty');
 
-        try {
-            $cmd = CommandBuilder::buildCommand('test', [$veryLongString]);
-            $this->assertIsString($cmd);
-        } catch (RuntimeException $e) {
-            $this->assertStringContainsString('Failed to build command', $e->getMessage());
-        }
+        CommandBuilder::buildCommandArgs('', ['arg']);
     }
 
-    /**
-     * Test command builder constants
-     */
+    public function testWhitespaceOnlyExecutableThrowsException(): void
+    {
+        $this->expectException(InvalidArgumentException::class);
+        $this->expectExceptionMessage('Executable cannot be empty');
+
+        CommandBuilder::buildCommandArgs('   ', ['arg']);
+    }
+
+    public function testInvalidCommandTypeThrowsException(): void
+    {
+        $this->expectException(InvalidArgumentException::class);
+        $this->expectExceptionMessage('Invalid command type');
+
+        CommandBuilder::buildCommandArgs('test', [], [], 'invalid_type');
+    }
+
+    public function testNonStringOptionKeysAreSkipped(): void
+    {
+        $args = CommandBuilder::buildCommandArgs('test', [], [0 => 'positional-looking', 'real' => 'value']);
+
+        $this->assertNotContains('positional-looking', $args);
+        $this->assertSame('value', $this->valueAfter($args, '--real'));
+    }
+
+    public function testVeryLongArgumentIsPassedThroughUntouched(): void
+    {
+        // argv has no shell length limit to guard against, and no escaping step
+        // that could fail — a 1MB value must simply arrive intact.
+        $long = str_repeat('a', 1000000);
+
+        $args = CommandBuilder::buildCommandArgs('test', [$long]);
+
+        $this->assertSame($long, end($args));
+    }
+
     public function testCommandBuilderConstants(): void
     {
-        $this->assertEquals('generic', CommandBuilder::TYPE_GENERIC);
-        $this->assertEquals('curl', CommandBuilder::TYPE_CURL);
+        $this->assertSame('generic', CommandBuilder::TYPE_GENERIC);
+        $this->assertSame('curl', CommandBuilder::TYPE_CURL);
+    }
+
+    // -------------------------------------------------------------------------
+    // Safety
+    // -------------------------------------------------------------------------
+
+    /**
+     * Shell metacharacters must arrive VERBATIM. proc_open array mode never
+     * invokes a shell, so nothing can interpret them — and adding quotes here
+     * would corrupt the value, since the program would receive the quotes too.
+     */
+    #[DataProvider('dangerousInputProvider')]
+    public function testShellMetacharactersArePassedThroughVerbatim(string $dangerous): void
+    {
+        $args = CommandBuilder::buildCommandArgs('safe-command', [$dangerous], ['option' => $dangerous]);
+
+        $this->assertSame('safe-command', $args[0]);
+        $this->assertSame($dangerous, $this->valueAfter($args, '--option'));
+        $this->assertSame($dangerous, end($args));
+
+        // Never quoted or escaped: exactly two occurrences, both unmodified.
+        $this->assertSame(2, count(array_keys($args, $dangerous, true)));
     }
 
     /**
-     * Test that commands are properly escaped and safe
+     * @return array<string, array{0: string}>
      */
-    public function testCommandSafety(): void
+    public static function dangerousInputProvider(): array
     {
-        // Test potentially dangerous inputs
-        $dangerousInputs = [
-            '; rm -rf /',
-            '&& echo hacked',
-            '| cat /etc/passwd',
-            '$(whoami)',
-            '`id`',
-            "O'Reilly", // Test single quote escaping
-            "file'name.txt", // Test single quote in filename
+        return [
+            'command chaining' => ['; rm -rf /'],
+            'and chaining' => ['&& echo hacked'],
+            'pipe' => ['| cat /etc/passwd'],
+            'subshell' => ['$(whoami)'],
+            'backticks' => ['`id`'],
+            'single quote' => ["O'Reilly"],
+            'quote in filename' => ["file'name.txt"],
+            'double quotes' => ['file with "quotes"'],
+            'spaces' => ['Hello World'],
+            'newline' => ["file with\nnewlines"],
+            'tab' => ["file with\ttabs"],
+            'dollar' => ['file$with$dollars'],
+            'braces' => ['file{with}braces'],
         ];
-
-        foreach ($dangerousInputs as $dangerous) {
-            $cmd = CommandBuilder::buildCommand('safe-command', [$dangerous], ['option' => $dangerous]);
-
-            // The dangerous parts should be properly escaped
-            $this->assertIsString($cmd);
-            $this->assertStringContainsString('safe-command', $cmd);
-
-            // Get the properly escaped version using escapeshellarg()
-            $escapedDangerous = escapeshellarg($dangerous);
-
-            // Verify that the command contains the properly escaped dangerous content
-            $this->assertStringContainsString(
-                $escapedDangerous,
-                $cmd,
-                "Dangerous content should be properly escaped: {$dangerous} -> {$escapedDangerous}"
-            );
-
-            // Verify that the command structure is safe
-            // The command should start with the executable and contain properly quoted arguments
-            $this->assertStringStartsWith('safe-command', trim($cmd));
-
-            // Verify that the command contains the expected number of escaped arguments
-            // Each dangerous input should appear twice: once as an argument, once as an option value
-            $expectedOccurrences = 2;
-            $actualOccurrences = substr_count($cmd, $escapedDangerous);
-            $this->assertEquals(
-                $expectedOccurrences,
-                $actualOccurrences,
-                "Command should contain dangerous content exactly {$expectedOccurrences} times (as argument and option): {$cmd}"
-            );
-        }
     }
 }

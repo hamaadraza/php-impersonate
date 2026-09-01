@@ -74,6 +74,74 @@ class EngineParityTest extends TestCase
         $this->assertSame($ffi, $capped(PHPImpersonate::ENGINE_PROCESS));
     }
 
+    /**
+     * A caller header must REPLACE the profile's, not be appended alongside it.
+     * curl sends every -H it is handed, so the executable engine used to emit
+     * two User-Agent lines where libcurl replaces by name — a divergence, and a
+     * bot signal in its own right.
+     */
+    public function testCallerHeaderReplacesProfileHeaderOnBothEngines(): void
+    {
+        TestServer::requireHttpbin($this);
+
+        $sent = function (string $engine): array {
+            return (new PHPImpersonate('chrome146', 30, [], $engine))
+                ->sendGet(TestServer::httpbin('/headers'), [
+                    'User-Agent' => 'MyCustomAgent/1.0',
+                    'Accept-Language' => 'de-DE',
+                ])->json()['headers'] ?? [];
+        };
+
+        foreach ([PHPImpersonate::ENGINE_FFI, PHPImpersonate::ENGINE_PROCESS] as $engine) {
+            $headers = $sent($engine);
+
+            // httpbin folds repeated headers into one comma-separated value, so
+            // a duplicate shows up as the profile value trailing the caller's.
+            $this->assertSame('MyCustomAgent/1.0', $headers['User-Agent'] ?? null, "$engine duplicated User-Agent");
+            $this->assertSame('de-DE', $headers['Accept-Language'] ?? null, "$engine duplicated Accept-Language");
+        }
+    }
+
+    public function testProfileHeadersSurviveWhenNotOverridden(): void
+    {
+        TestServer::requireHttpbin($this);
+
+        // The replace rule must not swallow the profile when nothing overrides it.
+        foreach ([PHPImpersonate::ENGINE_FFI, PHPImpersonate::ENGINE_PROCESS] as $engine) {
+            $headers = (new PHPImpersonate('chrome146', 30, [], $engine))
+                ->sendGet(TestServer::httpbin('/headers'))->json()['headers'] ?? [];
+
+            $this->assertStringContainsString('Chrome/146', $headers['User-Agent'] ?? '', "$engine lost the profile UA");
+        }
+    }
+
+    /**
+     * A loose value for a bool option must mean the same thing on both engines.
+     * Rendered naively the executable engine produced `--insecure no`, where
+     * curl reads `no` as an extra URL — corrupting the body with a second
+     * response's write-out while also enabling the flag the caller turned off.
+     */
+    public function testLooseBooleanOptionBehavesIdenticallyOnBothEngines(): void
+    {
+        TestServer::requireHttpbin($this);
+
+        $bodies = [];
+        foreach ([PHPImpersonate::ENGINE_FFI, PHPImpersonate::ENGINE_PROCESS] as $engine) {
+            $response = (new PHPImpersonate('chrome146', 30, ['insecure' => 'no'], $engine))
+                ->sendGet(TestServer::httpbin('/headers'));
+
+            $this->assertSame(200, $response->status(), "$engine did not return a clean 200");
+            $this->assertIsArray($response->json(), "$engine returned a corrupted body");
+            $bodies[$engine] = $response->json()['headers']['User-Agent'] ?? null;
+        }
+
+        $this->assertSame(
+            $bodies[PHPImpersonate::ENGINE_FFI],
+            $bodies[PHPImpersonate::ENGINE_PROCESS],
+            'engines disagreed on a loose bool option'
+        );
+    }
+
     public function testGetWithBodyKeepsMethodOnBothEngines(): void
     {
         TestServer::requireHttpbin($this);

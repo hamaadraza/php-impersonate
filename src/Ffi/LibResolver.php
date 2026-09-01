@@ -20,10 +20,36 @@ final class LibResolver
 {
     public const ENV_VAR = 'PHP_IMPERSONATE_LIB';
 
+    /** Memoised resolution; false means "not resolved yet". */
+    private static string|false|null $resolved = false;
+
     /**
      * Resolve an existing, readable library path, or null if none is available.
+     *
+     * Memoised: this runs on every FFI request, and each miss re-stats the
+     * candidate paths and re-probes the libc through
+     * PlatformDetector::isMusl(), which spawns `ldd`. Uncached it dominated the
+     * cost of a request the FFI engine exists to keep process-free.
      */
     public static function resolve(): ?string
+    {
+        if (self::$resolved !== false) {
+            return self::$resolved;
+        }
+
+        return self::$resolved = self::locate();
+    }
+
+    /**
+     * Discard the memoised path, so a library installed (or an env var changed)
+     * mid-process is picked up on the next resolve().
+     */
+    public static function clearCache(): void
+    {
+        self::$resolved = false;
+    }
+
+    private static function locate(): ?string
     {
         $env = getenv(self::ENV_VAR);
         if (is_string($env) && $env !== '' && is_file($env) && is_readable($env)) {

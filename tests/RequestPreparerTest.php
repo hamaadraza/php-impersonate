@@ -23,14 +23,41 @@ class RequestPreparerTest extends TestCase
         $this->assertSame('5', $result['X-Num']);
     }
 
-    public function testNormalizeHeadersDropsMalformedEntries(): void
+    /**
+     * Malformed entries are rejected, not dropped: silently discarding them
+     * meant a typo'd header simply never reached the wire.
+     *
+     * @return array<string, array{0: array<int|string,mixed>, 1: string}>
+     */
+    public static function malformedHeaderProvider(): array
     {
-        $result = RequestPreparer::normalizeHeaders([
-            'no colon here',   // int key, no colon -> dropped
-            ': empty name',    // empty name -> dropped
-        ]);
+        return [
+            'list entry without colon' => [['no colon here'], 'list-form entries must be'],
+            'list entry with empty name' => [[': empty name'], 'non-empty name'],
+            'non-string list entry' => [[123], 'list-form entries must be'],
+            'array value' => [['X-Arr' => ['a', 'b']], 'expected a string or number'],
+            'null value' => [['X-Null' => null], 'expected a string or number'],
+            'bool value' => [['X-Bool' => true], 'expected a string or number'],
+        ];
+    }
 
-        $this->assertSame([], $result);
+    /**
+     * @param array<int|string,mixed> $headers
+     */
+    #[DataProvider('malformedHeaderProvider')]
+    public function testNormalizeHeadersRejectsMalformedEntries(array $headers, string $expectedMessage): void
+    {
+        $this->expectException(InvalidArgumentException::class);
+        $this->expectExceptionMessageMatches('/' . preg_quote($expectedMessage, '/') . '/');
+
+        RequestPreparer::normalizeHeaders($headers);
+    }
+
+    public function testNormalizeHeadersIsIdempotent(): void
+    {
+        $once = RequestPreparer::normalizeHeaders(['X-List: b', 'X-Assoc' => 'a']);
+
+        $this->assertSame($once, RequestPreparer::normalizeHeaders($once));
     }
 
     public function testFindHeaderValueIsCaseInsensitive(): void

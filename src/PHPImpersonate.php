@@ -27,8 +27,14 @@ use Raza\PHPImpersonate\Exception\PlatformNotSupportedException;
  */
 class PHPImpersonate implements ClientInterface
 {
-    private const DEFAULT_BROWSER = 'firefox147';
-    private const DEFAULT_TIMEOUT = 30;
+    /**
+     * Public so every entry point (including {@see PHPImpersonateFactory})
+     * shares one definition of the defaults instead of re-declaring literals
+     * that silently drift apart.
+     */
+    public const DEFAULT_BROWSER = 'firefox147';
+    public const DEFAULT_TIMEOUT = 30;
+
     private const MAX_TIMEOUT = 3600; // 1 hour max
     private const MIN_TIMEOUT = 1;
 
@@ -94,8 +100,11 @@ class PHPImpersonate implements ClientInterface
         $this->validateTimeout($timeout);
         $this->validatePlatform();
         CurlOptions::assertAllowed($curlOptions);
+        // Canonicalise once: both engines apply the result, and the FFI cache
+        // key below is built from it, so equivalent configs share one engine.
+        $this->curlOptions = CurlOptions::normalize($curlOptions);
         $this->engine = $this->resolveEngine($engine);
-        $this->initializeBrowser($browser);
+        $this->initializeBrowser($browser, $engine);
     }
 
     /**
@@ -206,19 +215,22 @@ class PHPImpersonate implements ClientInterface
     // Static convenience methods
     /**
      * @param BrowserName $browser Browser name (see BrowserName constants or constructor docblock)
+     * @param self::ENGINE_* $engine Engine to use; 'auto' (default) picks FFI when usable.
      */
     public static function get(
         string $url,
         array $headers = [],
         int $timeout = self::DEFAULT_TIMEOUT,
         string $browser = self::DEFAULT_BROWSER,
-        array $curlOptions = []
+        array $curlOptions = [],
+        string $engine = self::ENGINE_AUTO
     ): Response {
-        return (new self($browser, $timeout, $curlOptions))->sendGet($url, $headers);
+        return (new self($browser, $timeout, $curlOptions, $engine))->sendGet($url, $headers);
     }
 
     /**
      * @param BrowserName $browser Browser name (see BrowserName constants or constructor docblock)
+     * @param self::ENGINE_* $engine Engine to use; 'auto' (default) picks FFI when usable.
      */
     public static function post(
         string $url,
@@ -226,39 +238,45 @@ class PHPImpersonate implements ClientInterface
         array $headers = [],
         int $timeout = self::DEFAULT_TIMEOUT,
         string $browser = self::DEFAULT_BROWSER,
-        array $curlOptions = []
+        array $curlOptions = [],
+        string $engine = self::ENGINE_AUTO
     ): Response {
-        return (new self($browser, $timeout, $curlOptions))->sendPost($url, $data, $headers);
+        return (new self($browser, $timeout, $curlOptions, $engine))->sendPost($url, $data, $headers);
     }
 
     /**
      * @param BrowserName $browser Browser name (see BrowserName constants or constructor docblock)
+     * @param self::ENGINE_* $engine Engine to use; 'auto' (default) picks FFI when usable.
      */
     public static function head(
         string $url,
         array $headers = [],
         int $timeout = self::DEFAULT_TIMEOUT,
         string $browser = self::DEFAULT_BROWSER,
-        array $curlOptions = []
+        array $curlOptions = [],
+        string $engine = self::ENGINE_AUTO
     ): Response {
-        return (new self($browser, $timeout, $curlOptions))->sendHead($url, $headers);
+        return (new self($browser, $timeout, $curlOptions, $engine))->sendHead($url, $headers);
     }
 
     /**
      * @param BrowserName $browser Browser name (see BrowserName constants or constructor docblock)
+     * @param self::ENGINE_* $engine Engine to use; 'auto' (default) picks FFI when usable.
      */
     public static function delete(
         string $url,
         array $headers = [],
         int $timeout = self::DEFAULT_TIMEOUT,
         string $browser = self::DEFAULT_BROWSER,
-        array $curlOptions = []
+        array $curlOptions = [],
+        string $engine = self::ENGINE_AUTO
     ): Response {
-        return (new self($browser, $timeout, $curlOptions))->sendDelete($url, $headers);
+        return (new self($browser, $timeout, $curlOptions, $engine))->sendDelete($url, $headers);
     }
 
     /**
      * @param BrowserName $browser Browser name (see BrowserName constants or constructor docblock)
+     * @param self::ENGINE_* $engine Engine to use; 'auto' (default) picks FFI when usable.
      */
     public static function patch(
         string $url,
@@ -266,13 +284,15 @@ class PHPImpersonate implements ClientInterface
         array $headers = [],
         int $timeout = self::DEFAULT_TIMEOUT,
         string $browser = self::DEFAULT_BROWSER,
-        array $curlOptions = []
+        array $curlOptions = [],
+        string $engine = self::ENGINE_AUTO
     ): Response {
-        return (new self($browser, $timeout, $curlOptions))->sendPatch($url, $data, $headers);
+        return (new self($browser, $timeout, $curlOptions, $engine))->sendPatch($url, $data, $headers);
     }
 
     /**
      * @param BrowserName $browser Browser name (see BrowserName constants or constructor docblock)
+     * @param self::ENGINE_* $engine Engine to use; 'auto' (default) picks FFI when usable.
      */
     public static function put(
         string $url,
@@ -280,9 +300,10 @@ class PHPImpersonate implements ClientInterface
         array $headers = [],
         int $timeout = self::DEFAULT_TIMEOUT,
         string $browser = self::DEFAULT_BROWSER,
-        array $curlOptions = []
+        array $curlOptions = [],
+        string $engine = self::ENGINE_AUTO
     ): Response {
-        return (new self($browser, $timeout, $curlOptions))->sendPut($url, $data, $headers);
+        return (new self($browser, $timeout, $curlOptions, $engine))->sendPut($url, $data, $headers);
     }
 
     /**
@@ -449,11 +470,30 @@ class PHPImpersonate implements ClientInterface
      * binary) is only created for the process engine; the FFI engine needs just
      * the name and validates it against the known configs.
      */
-    private function initializeBrowser(string|BrowserInterface $browser): void
+    private function initializeBrowser(string|BrowserInterface $browser, string $requestedEngine): void
     {
         if ($browser instanceof BrowserInterface) {
             $this->browser = $browser;
             $this->browserName = $browser->getName();
+
+            // The FFI engine impersonates BY NAME: it applies the shared
+            // library's own built-in profile and never sees getConfig(). For an
+            // instance carrying a custom config, staying on FFI would silently
+            // send a different fingerprint than the caller assembled, so fall
+            // back to the engine that can actually apply it.
+            if ($this->engine === self::ENGINE_FFI && ! self::carriesBuiltinConfig($browser)) {
+                if ($requestedEngine === self::ENGINE_FFI) {
+                    throw new RequestException(sprintf(
+                        "Browser '%s' supplies a custom configuration, which the FFI engine cannot apply "
+                        . '(it impersonates by name using the shared library\'s built-in profiles). '
+                        . "Use engine '%s', or pass a browser name instead of a BrowserInterface.",
+                        $this->browserName,
+                        self::ENGINE_PROCESS
+                    ));
+                }
+
+                $this->engine = self::ENGINE_PROCESS;
+            }
 
             return;
         }
@@ -473,6 +513,19 @@ class PHPImpersonate implements ClientInterface
                 implode(', ', BrowserConfig::getAvailableBrowsers())
             ));
         }
+    }
+
+    /**
+     * Whether an instance carries exactly the built-in config for its name, in
+     * which case the FFI engine's by-name profile is equivalent and using it
+     * loses nothing. Anything else is a custom profile only the executable
+     * engine can render.
+     */
+    private static function carriesBuiltinConfig(BrowserInterface $browser): bool
+    {
+        $name = $browser->getName();
+
+        return BrowserConfig::hasConfig($name) && $browser->getConfig() === BrowserConfig::getConfig($name);
     }
 
     /**

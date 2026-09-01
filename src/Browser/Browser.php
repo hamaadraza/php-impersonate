@@ -88,7 +88,12 @@ class Browser implements BrowserInterface
             // If it's a name only, try resolving via "which" / "where"
             if ($this->isCommandName($path)) {
                 $resolved = $this->findInPath($path, $platform);
-                if ($resolved) {
+
+                // Verify it like any other candidate. On Windows the name being
+                // searched is "curl.exe" and Windows 10+ ships a stock one in
+                // System32 — accepting that would swap curl-impersonate for a
+                // plain curl instead of reporting the binary as missing.
+                if ($resolved !== null && $this->isCurlImpersonate($resolved, $platform)) {
                     $this->executablePath = $resolved;
 
                     return;
@@ -226,7 +231,15 @@ class Browser implements BrowserInterface
      */
     private function findInPath(string $command, string $platform): ?string
     {
-        $whichCommand = Configuration::get('which_command') ?? ($platform === PlatformDetector::PLATFORM_WINDOWS ? 'where' : 'which');
+        $default = $platform === PlatformDetector::PLATFORM_WINDOWS ? 'where' : 'which';
+        $configured = Configuration::get('which_command');
+
+        // This string is interpolated into a shell command, and the platform
+        // config is publicly settable, so accept only a bare command name/path.
+        $whichCommand = is_string($configured) && preg_match('#^[\w.:/\\\\-]+$#', $configured)
+            ? $configured
+            : $default;
+
         $errorRedirect = $platform === PlatformDetector::PLATFORM_WINDOWS ? '2>nul' : '2>/dev/null';
 
         $result = shell_exec("$whichCommand " . escapeshellarg($command) . " $errorRedirect");

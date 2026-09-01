@@ -19,17 +19,19 @@ class PHPImpersonateFactory
      * @param int $timeout Timeout in seconds
      * @param BrowserName $browser Browser to impersonate (see BrowserName constants)
      * @param array<string,mixed> $curlOptions Custom curl options to add to the request
+     * @param PHPImpersonate::ENGINE_* $engine Engine to use ('auto', 'ffi' or 'process')
      * @return Response
      * @throws RequestException
      */
     public static function get(
         string $url,
         array $headers = [],
-        int $timeout = 30,
-        string $browser = 'firefox147',
-        array $curlOptions = []
+        int $timeout = PHPImpersonate::DEFAULT_TIMEOUT,
+        string $browser = PHPImpersonate::DEFAULT_BROWSER,
+        array $curlOptions = [],
+        string $engine = PHPImpersonate::ENGINE_AUTO
     ): Response {
-        $client = new PHPImpersonate($browser, $timeout, $curlOptions);
+        $client = new PHPImpersonate($browser, $timeout, $curlOptions, $engine);
 
         return $client->sendGet($url, $headers);
     }
@@ -43,6 +45,7 @@ class PHPImpersonateFactory
      * @param int $timeout Timeout in seconds
      * @param BrowserName $browser Browser to impersonate (see BrowserName constants)
      * @param array<string,mixed> $curlOptions Custom curl options to add to the request
+     * @param PHPImpersonate::ENGINE_* $engine Engine to use ('auto', 'ffi' or 'process')
      * @return Response
      * @throws RequestException
      */
@@ -50,11 +53,12 @@ class PHPImpersonateFactory
         string $url,
         ?array $data = null,
         array $headers = [],
-        int $timeout = 30,
-        string $browser = 'firefox147',
-        array $curlOptions = []
+        int $timeout = PHPImpersonate::DEFAULT_TIMEOUT,
+        string $browser = PHPImpersonate::DEFAULT_BROWSER,
+        array $curlOptions = [],
+        string $engine = PHPImpersonate::ENGINE_AUTO
     ): Response {
-        $client = new PHPImpersonate($browser, $timeout, $curlOptions);
+        $client = new PHPImpersonate($browser, $timeout, $curlOptions, $engine);
 
         return $client->sendPost($url, $data, $headers);
     }
@@ -67,17 +71,19 @@ class PHPImpersonateFactory
      * @param int $timeout Timeout in seconds
      * @param BrowserName $browser Browser to impersonate (see BrowserName constants)
      * @param array<string,mixed> $curlOptions Custom curl options to add to the request
+     * @param PHPImpersonate::ENGINE_* $engine Engine to use ('auto', 'ffi' or 'process')
      * @return Response
      * @throws RequestException
      */
     public static function head(
         string $url,
         array $headers = [],
-        int $timeout = 30,
-        string $browser = 'firefox147',
-        array $curlOptions = []
+        int $timeout = PHPImpersonate::DEFAULT_TIMEOUT,
+        string $browser = PHPImpersonate::DEFAULT_BROWSER,
+        array $curlOptions = [],
+        string $engine = PHPImpersonate::ENGINE_AUTO
     ): Response {
-        $client = new PHPImpersonate($browser, $timeout, $curlOptions);
+        $client = new PHPImpersonate($browser, $timeout, $curlOptions, $engine);
 
         return $client->sendHead($url, $headers);
     }
@@ -90,17 +96,19 @@ class PHPImpersonateFactory
      * @param int $timeout Timeout in seconds
      * @param BrowserName $browser Browser to impersonate (see BrowserName constants)
      * @param array<string,mixed> $curlOptions Custom curl options to add to the request
+     * @param PHPImpersonate::ENGINE_* $engine Engine to use ('auto', 'ffi' or 'process')
      * @return Response
      * @throws RequestException
      */
     public static function delete(
         string $url,
         array $headers = [],
-        int $timeout = 30,
-        string $browser = 'firefox147',
-        array $curlOptions = []
+        int $timeout = PHPImpersonate::DEFAULT_TIMEOUT,
+        string $browser = PHPImpersonate::DEFAULT_BROWSER,
+        array $curlOptions = [],
+        string $engine = PHPImpersonate::ENGINE_AUTO
     ): Response {
-        $client = new PHPImpersonate($browser, $timeout, $curlOptions);
+        $client = new PHPImpersonate($browser, $timeout, $curlOptions, $engine);
 
         return $client->sendDelete($url, $headers);
     }
@@ -114,6 +122,7 @@ class PHPImpersonateFactory
      * @param int $timeout Timeout in seconds
      * @param BrowserName $browser Browser to impersonate (see BrowserName constants)
      * @param array<string,mixed> $curlOptions Custom curl options to add to the request
+     * @param PHPImpersonate::ENGINE_* $engine Engine to use ('auto', 'ffi' or 'process')
      * @return Response
      * @throws RequestException
      */
@@ -121,11 +130,12 @@ class PHPImpersonateFactory
         string $url,
         ?array $data = null,
         array $headers = [],
-        int $timeout = 30,
-        string $browser = 'firefox147',
-        array $curlOptions = []
+        int $timeout = PHPImpersonate::DEFAULT_TIMEOUT,
+        string $browser = PHPImpersonate::DEFAULT_BROWSER,
+        array $curlOptions = [],
+        string $engine = PHPImpersonate::ENGINE_AUTO
     ): Response {
-        $client = new PHPImpersonate($browser, $timeout, $curlOptions);
+        $client = new PHPImpersonate($browser, $timeout, $curlOptions, $engine);
 
         return $client->sendPatch($url, $data, $headers);
     }
@@ -139,6 +149,7 @@ class PHPImpersonateFactory
      * @param int $timeout Timeout in seconds
      * @param BrowserName $browser Browser to impersonate (see BrowserName constants)
      * @param array<string,mixed> $curlOptions Custom curl options to add to the request
+     * @param PHPImpersonate::ENGINE_* $engine Engine to use ('auto', 'ffi' or 'process')
      * @return Response
      * @throws RequestException
      */
@@ -146,11 +157,12 @@ class PHPImpersonateFactory
         string $url,
         ?array $data = null,
         array $headers = [],
-        int $timeout = 30,
-        string $browser = 'firefox147',
-        array $curlOptions = []
+        int $timeout = PHPImpersonate::DEFAULT_TIMEOUT,
+        string $browser = PHPImpersonate::DEFAULT_BROWSER,
+        array $curlOptions = [],
+        string $engine = PHPImpersonate::ENGINE_AUTO
     ): Response {
-        $client = new PHPImpersonate($browser, $timeout, $curlOptions);
+        $client = new PHPImpersonate($browser, $timeout, $curlOptions, $engine);
 
         return $client->sendPut($url, $data, $headers);
     }

@@ -138,23 +138,6 @@ class PlatformTest extends TestCase
     }
 
     /**
-     * Test command separator
-     */
-    public function testCommandSeparator()
-    {
-        $separator = PlatformDetector::getCommandSeparator();
-
-        $this->assertIsString($separator);
-
-        $platform = PlatformDetector::getPlatform();
-        if ($platform === PlatformDetector::PLATFORM_WINDOWS) {
-            $this->assertEquals('^', $separator);
-        } else {
-            $this->assertEquals('\\', $separator);
-        }
-    }
-
-    /**
      * Test platform description
      */
     public function testPlatformDescription()

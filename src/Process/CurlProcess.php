@@ -3,6 +3,7 @@
 namespace Raza\PHPImpersonate\Process;
 
 use Raza\PHPImpersonate\Support\CaBundle;
+use Raza\PHPImpersonate\Support\CurlOptions;
 use Raza\PHPImpersonate\Platform\CommandBuilder;
 use Raza\PHPImpersonate\Support\RequestPreparer;
 use Raza\PHPImpersonate\Browser\BrowserInterface;
@@ -32,6 +33,10 @@ final class CurlProcess
         private int $timeout,
         private array $curlOptions
     ) {
+        // Canonicalise so a loose value cannot become a stray argv entry: a
+        // bool option rendered as `--insecure no` would hand curl `no` as a
+        // second URL. See CurlOptions::normalize().
+        $this->curlOptions = CurlOptions::normalize($curlOptions);
     }
 
     public function __destruct()
@@ -86,7 +91,7 @@ final class CurlProcess
             // If we still don't have a proper status code, try the headers.
             // captureResponseFromOutput() reports an unknown status as the string '0'.
             if ($extractedStatus === '0') {
-                $extractedStatus = $this->extractStatusFromHeaders(ResponseHeaderParser::parse($rawHeaders));
+                $extractedStatus = $this->extractStatusFromHeaders($rawHeaders);
             }
 
             $statusCode = $extractedStatus !== null ? (int) $extractedStatus : (int) $result['status_code'];
@@ -198,26 +203,23 @@ final class CurlProcess
     }
 
     /**
-     * Extract an HTTP status code from parsed response headers.
+     * Extract an HTTP status code from a raw response header block.
      *
-     * @param array<string, string[]> $headers
      * @return string|null Null when no status line is present — callers must not
      *                     assume success in that case.
      */
-    private function extractStatusFromHeaders(array $headers): ?string
+    private function extractStatusFromHeaders(string $rawHeaders): ?string
     {
-        if (isset($headers['HTTP_STATUS'][0])) {
-            if (preg_match('/(\d{3})/', $headers['HTTP_STATUS'][0], $matches)) {
-                return $matches[1];
-            }
+        $statusLine = ResponseHeaderParser::statusLine($rawHeaders);
+
+        if ($statusLine !== null && preg_match('#^HTTP/[\d.]+\s+(\d{3})#', $statusLine, $matches)) {
+            return $matches[1];
         }
 
-        foreach ($headers as $values) {
-            foreach ($values as $value) {
-                if (preg_match('/HTTP\/[\d.]+\s+(\d{3})/', $value, $matches)) {
-                    return $matches[1];
-                }
-            }
+        // Fall back to the last status line anywhere in the block, in case the
+        // final section could not be isolated (e.g. a truncated dump).
+        if (preg_match_all('#^HTTP/[\d.]+\s+(\d{3})#mi', $rawHeaders, $matches)) {
+            return (string) end($matches[1]);
         }
 
         return null;
@@ -274,9 +276,11 @@ final class CurlProcess
             $additionalTempFiles = $this->addBodyToOptions($options, $body);
         }
 
-        $options = $this->mergeBrowserConfig($options, $browserConfig);
+        // Pass the caller's header names so the profile does not re-add any of
+        // them: curl emits every -H it is given, so both would go on the wire.
+        $options = $this->mergeBrowserConfig($options, $browserConfig, array_keys($headers));
 
-        // Add custom curl options (already validated).
+        // Add custom curl options (already validated and normalised).
         $options = array_merge($options, $this->curlOptions);
 
         $allTempFiles = array_merge($headersTempFiles, $additionalTempFiles);
@@ -373,15 +377,22 @@ final class CurlProcess
             return;
         }
 
-        if (PlatformDetector::isWindows()) {
-            $options['ca-native'] = true;
-
-            return;
-        }
-
         $ca = CaBundle::path();
+        $caDir = CaBundle::directory();
+
         if ($ca !== null) {
             $options['cacert'] = $ca;
+        }
+        if ($caDir !== null) {
+            $options['capath'] = $caDir;
+        }
+
+        // Only when nothing was resolved: Windows has no bundle file to find,
+        // so it falls back to the native trust store. An explicit
+        // CURL_CA_BUNDLE/SSL_CERT_FILE still wins there, which is the point of
+        // setting it.
+        if ($ca === null && $caDir === null && PlatformDetector::isWindows()) {
+            $options['ca-native'] = true;
         }
     }
 
@@ -414,9 +425,11 @@ final class CurlProcess
      *
      * @param array<string,mixed> $options
      * @param array<string,mixed> $browserConfig
+     * @param list<array-key> $callerHeaderNames Header names the caller supplied;
+     *                                           the profile never re-adds these.
      * @return array<string,mixed>
      */
-    private function mergeBrowserConfig(array $options, array $browserConfig): array
+    private function mergeBrowserConfig(array $options, array $browserConfig, array $callerHeaderNames = []): array
     {
         if (isset($browserConfig['ciphers'])) {
             $options['ciphers'] = $browserConfig['ciphers'];
@@ -429,7 +442,21 @@ final class CurlProcess
         }
 
         if (isset($browserConfig['headers'])) {
+            // A caller header REPLACES the profile's, it does not add to it.
+            // curl sends every -H it receives, so emitting both would put two
+            // User-Agent lines on the wire — a bot signal in its own right, and
+            // a silent divergence from the FFI engine, where libcurl replaces
+            // a profile header by name. Names are matched case-insensitively
+            // (RFC 9110 §5.1).
+            $supplied = [];
+            foreach ($callerHeaderNames as $name) {
+                $supplied[strtolower((string) $name)] = true;
+            }
+
             foreach ($browserConfig['headers'] as $name => $value) {
+                if (isset($supplied[strtolower((string) $name)])) {
+                    continue;
+                }
                 $options['H'][] = "$name: $value";
             }
         }
@@ -533,8 +560,15 @@ final class CurlProcess
             }
         }
 
-        $output .= stream_get_contents($pipes[1]) ?: '';
-        $errors .= stream_get_contents($pipes[2]) ?: '';
+        // Strict false check: `?:` would discard a final chunk of exactly "0".
+        $tailOut = stream_get_contents($pipes[1]);
+        $tailErr = stream_get_contents($pipes[2]);
+        if ($tailOut !== false) {
+            $output .= $tailOut;
+        }
+        if ($tailErr !== false) {
+            $errors .= $tailErr;
+        }
 
         $exitCode = proc_close($process);
 
@@ -567,10 +601,19 @@ final class CurlProcess
         int $exitCode,
         string $command
     ): array {
-        $outputLines = array_filter(explode("\n", trim($output)));
-        $errorLines = array_filter(explode("\n", trim($errors)));
+        // Keep every stdout line verbatim. array_filter() would drop a line that
+        // is exactly "0" or blank, and on the Windows recovery path these lines
+        // ARE the response body — the same body-of-"0" case guarded in request().
+        $trimmedOutput = trim($output);
+        $trimmedErrors = trim($errors);
+        $outputLines = $trimmedOutput === '' ? [] : explode("\n", $trimmedOutput);
+        // Diagnostics only, so blank lines are just noise here.
+        $errorLines = $trimmedErrors === '' ? [] : array_values(array_filter(
+            explode("\n", $trimmedErrors),
+            static fn (string $line): bool => trim($line) !== ''
+        ));
 
-        $lastLine = end($outputLines) ?: '';
+        $lastLine = $outputLines === [] ? '' : trim((string) end($outputLines));
         $statusCode = is_numeric($lastLine) ? $lastLine : '0';
 
         // $statusCode is always a numeric string here; only the range needs checking.

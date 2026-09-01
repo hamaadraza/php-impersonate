@@ -28,20 +28,50 @@ final class CaBundle
     ];
 
     /**
+     * Environment overrides, in curl's own order of precedence.
+     *
+     * @var list<string>
+     */
+    private const ENV_VARS = ['CURL_CA_BUNDLE', 'SSL_CERT_FILE'];
+
+    /**
      * Resolve a readable CA bundle file path, or null if none is found (Windows,
-     * or a system where the native/native-store should be used instead).
+     * or a system where the native trust store should be used instead).
+     *
+     * The environment is consulted FIRST: setting CURL_CA_BUNDLE or
+     * SSL_CERT_FILE is how an operator points the client at a specific bundle,
+     * and it must not be silently ignored just because the distro also ships one.
      */
     public static function path(): ?string
     {
+        foreach (self::ENV_VARS as $var) {
+            $value = getenv($var);
+            if (is_string($value) && $value !== '' && is_file($value) && is_readable($value)) {
+                return $value;
+            }
+        }
+
         foreach (self::LINUX_PATHS as $path) {
-            if (file_exists($path) && is_readable($path)) {
+            if (is_file($path) && is_readable($path)) {
                 return $path;
             }
         }
 
-        $envCertFile = getenv('SSL_CERT_FILE');
-        if ($envCertFile !== false && file_exists($envCertFile) && is_readable($envCertFile)) {
-            return $envCertFile;
+        return null;
+    }
+
+    /**
+     * Resolve a readable CA directory from SSL_CERT_DIR, or null when unset.
+     *
+     * Complements {@see path()}: OpenSSL-style setups may provide a hashed
+     * directory instead of (or alongside) a single bundle file.
+     */
+    public static function directory(): ?string
+    {
+        $value = getenv('SSL_CERT_DIR');
+
+        if (is_string($value) && $value !== '' && is_dir($value) && is_readable($value)) {
+            return $value;
         }
 
         return null;

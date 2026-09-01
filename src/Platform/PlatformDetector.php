@@ -51,9 +51,23 @@ class PlatformDetector
     }
 
     /**
-     * Detect the C library type (glibc vs musl) on Linux
+     * Memoised result of {@see getLibcType()}; the probe shells out to `ldd`.
+     */
+    private static ?string $libcType = null;
+
+    /**
+     * Detect the C library type (glibc vs musl) on Linux.
+     *
+     * Memoised: the libc cannot change within a process, and the probe spawns a
+     * shell. Callers reach it on hot paths — every LibResolver::resolve() goes
+     * through getBinaryDirFallbacks() -> isMusl() -> here.
      */
     public static function getLibcType(): string
+    {
+        return self::$libcType ??= self::detectLibcType();
+    }
+
+    private static function detectLibcType(): string
     {
         if (self::getPlatform() !== self::PLATFORM_LINUX) {
             return self::LIBC_GNU; // Not applicable for non-Linux
@@ -192,25 +206,6 @@ class PlatformDetector
             self::PLATFORM_LINUX => '',
             self::PLATFORM_MACOS => '',
             default => '',
-        };
-    }
-
-    /**
-     * Get the command separator for the current platform
-     *
-     * @deprecated Line-continuation characters only matter for shell command
-     *             strings, which the request path no longer builds. Kept for
-     *             backward compatibility.
-     */
-    public static function getCommandSeparator(): string
-    {
-        $platform = self::getPlatform();
-
-        return match ($platform) {
-            self::PLATFORM_WINDOWS => '^',
-            self::PLATFORM_LINUX => '\\',
-            self::PLATFORM_MACOS => '\\',
-            default => '\\',
         };
     }
 

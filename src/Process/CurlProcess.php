@@ -22,6 +22,14 @@ final class CurlProcess
 {
     private const PROCESS_TIMEOUT_BUFFER = 5;
 
+    /**
+     * Options whose value can carry a credential, and so must never become an
+     * argv entry. `proxy` counts because a proxy URL can embed `user:password`.
+     *
+     * @var list<string>
+     */
+    private const CREDENTIAL_OPTIONS = ['proxy', 'proxy-user'];
+
     /** @var array<int, string> Temp files created while serving requests, for cleanup. */
     private array $tempFiles = [];
 
@@ -269,30 +277,55 @@ final class CurlProcess
         $browserCmd = $this->browser->getExecutablePath();
         $browserConfig = $this->browser->getConfig();
 
-        [$options, $headersTempFiles] = $this->buildCurlOptions($method, $outputFile, $headerFile, $headers);
-        $additionalTempFiles = [];
+        $options = $this->buildCurlOptions($method, $outputFile, $headerFile);
+        $options = $this->mergeBrowserConfig($options, $browserConfig);
 
-        if ($body !== null) {
-            $additionalTempFiles = $this->addBodyToOptions($options, $body);
-        }
+        // Assemble and validate before creating any temp file, so a malformed
+        // header still surfaces as InvalidArgumentException and leaves nothing
+        // behind on disk.
+        $headerLines = $this->collectHeaderLines($headers, $browserConfig['headers'] ?? []);
+        [$credentials, $plainOptions] = $this->splitCredentialOptions($this->curlOptions);
 
-        // Pass the caller's header names so the profile does not re-add any of
-        // them: curl emits every -H it is given, so both would go on the wire.
-        $options = $this->mergeBrowserConfig($options, $browserConfig, array_keys($headers));
+        // Custom curl options (already validated and normalised).
+        $options = array_merge($options, $plainOptions);
 
-        // Add custom curl options (already validated and normalised).
-        $options = array_merge($options, $this->curlOptions);
-
-        $allTempFiles = array_merge($headersTempFiles, $additionalTempFiles);
+        $tempFiles = [];
 
         try {
+            if ($body !== null) {
+                $tempFiles = array_merge($tempFiles, $this->addBodyToOptions($options, $body));
+            }
+
+            // Every header goes through a 0600 temp file rather than argv. While
+            // the process runs its argv is readable by any local user through
+            // /proc/<pid>/cmdline (and `ps`), and a caller header routinely
+            // carries an Authorization token or a session Cookie. The profile's
+            // headers share the file so one list preserves the wire order.
+            if ($headerLines !== []) {
+                $file = $this->writeLinesToTempFile('curl_impersonate_request_headers', $headerLines, 'request headers');
+                $tempFiles[] = $file;
+                $options['H'] = ["@$file"];
+            }
+
+            // Credential-bearing options go to a curl config file for the same
+            // reason: --proxy-user on the command line is world-readable.
+            if ($credentials !== []) {
+                $file = $this->writeLinesToTempFile('curl_impersonate_config', self::configLines($credentials), 'curl configuration');
+                $tempFiles[] = $file;
+                $options['config'] = $file;
+            }
+
             // argv array for proc_open array mode: executed directly, no shell involved.
             $command = CommandBuilder::buildCurlCommandArgs($browserCmd, [$url], $options);
 
-            return ['command' => $command, 'tempFiles' => $allTempFiles];
+            return ['command' => $command, 'tempFiles' => $tempFiles];
         } catch (\Exception $e) {
-            foreach ($allTempFiles as $tempFile) {
+            foreach ($tempFiles as $tempFile) {
                 $this->deleteTempFile($tempFile);
+            }
+
+            if ($e instanceof RequestException) {
+                throw $e;
             }
 
             throw new RequestException('Failed to build curl command: ' . $e->getMessage(), 0, $e);
@@ -300,17 +333,108 @@ final class CurlProcess
     }
 
     /**
-     * Build base curl options.
+     * Assemble every header line for one request, the caller's first.
      *
-     * @param array<string,string> $headers
-     * @return array{0: array<string,mixed>, 1: array<int,string>} [options, tempFiles]
+     * A caller header REPLACES the profile's of the same name rather than adding
+     * to it: curl emits every header it is handed, so keeping both would put two
+     * User-Agent lines on the wire — a bot signal in its own right, and a
+     * divergence from the FFI engine, where libcurl replaces a profile header by
+     * name. Names are matched case-insensitively (RFC 9110 §5.1).
+     *
+     * @param array<string,string> $callerHeaders
+     * @param array<array-key,mixed> $profileHeaders
+     * @return list<string>
+     */
+    private function collectHeaderLines(array $callerHeaders, array $profileHeaders): array
+    {
+        $lines = [];
+        $supplied = [];
+
+        foreach ($callerHeaders as $name => $value) {
+            RequestPreparer::assertHeaderIsSafe((string) $name, (string) $value);
+            $supplied[strtolower((string) $name)] = true;
+            $lines[] = "$name: $value";
+        }
+
+        foreach ($profileHeaders as $name => $value) {
+            if (isset($supplied[strtolower((string) $name)])) {
+                continue;
+            }
+
+            // Validated too: profile headers now share a file with the caller's,
+            // where an embedded newline would smuggle in an extra header line.
+            RequestPreparer::assertHeaderIsSafe((string) $name, (string) $value);
+            $lines[] = "$name: $value";
+        }
+
+        return $lines;
+    }
+
+    /**
+     * Separate the options that can carry a credential from the rest.
+     *
+     * @param array<string,mixed> $curlOptions
+     * @return array{0: array<string,mixed>, 1: array<string,mixed>} [credential-bearing, rest]
+     */
+    private function splitCredentialOptions(array $curlOptions): array
+    {
+        $credentials = array_intersect_key($curlOptions, array_flip(self::CREDENTIAL_OPTIONS));
+
+        return [$credentials, array_diff_key($curlOptions, $credentials)];
+    }
+
+    /**
+     * Render options as curl config-file lines for `--config`. Values are
+     * double-quoted, so backslashes and quotes are escaped the way curl's own
+     * config parser expects.
+     *
+     * @param array<string,mixed> $options
+     * @return list<string>
+     */
+    private static function configLines(array $options): array
+    {
+        $lines = [];
+
+        foreach ($options as $name => $value) {
+            $escaped = str_replace(['\\', '"'], ['\\\\', '\\"'], (string) $value);
+            $lines[] = sprintf('%s = "%s"', $name, $escaped);
+        }
+
+        return $lines;
+    }
+
+    /**
+     * Write newline-separated lines to a fresh 0600 temp file.
+     *
+     * @param list<string> $lines
+     * @param string $what Human label for the error message.
+     */
+    private function writeLinesToTempFile(string $prefix, array $lines, string $what): string
+    {
+        $file = $this->createTempFile($prefix);
+
+        if (file_put_contents($file, implode("\n", $lines) . "\n") === false) {
+            $this->deleteTempFile($file);
+
+            throw new RequestException("Failed to write $what to a temporary file");
+        }
+
+        return $file;
+    }
+
+    /**
+     * Build base curl options. Headers are added separately by
+     * {@see buildCommand()}, which routes them through a temp file.
+     *
+     * @return array<string,mixed>
      */
     private function buildCurlOptions(
         string $method,
         string $outputFile,
-        string $headerFile,
-        array $headers
+        string $headerFile
     ): array {
+        $method = strtoupper($method);
+
         $options = [
             's' => true, // silent mode
             'no-progress-meter' => true,
@@ -321,7 +445,7 @@ final class CurlProcess
             'D' => $headerFile, // dump headers file
         ];
 
-        if (strtoupper($method) === 'HEAD') {
+        if ($method === 'HEAD') {
             // -X HEAD makes curl wait for a body the server never sends and can
             // hang until max-time on keep-alive connections; --head is correct.
             $options['head'] = true;
@@ -331,37 +455,7 @@ final class CurlProcess
 
         $this->addSslCertOptions($options);
 
-        $tempFiles = [];
-
-        // Use a temp file when headers are too large for the command line.
-        if (! empty($headers)) {
-            $headerLines = [];
-            foreach ($headers as $name => $value) {
-                RequestPreparer::assertHeaderIsSafe((string) $name, (string) $value);
-                $headerLines[] = "$name: $value";
-            }
-
-            $totalHeaderSize = array_sum(array_map('strlen', $headerLines));
-            $maxHeaderSize = 7000; // conservative (Windows command line limit is ~8191)
-
-            if ($totalHeaderSize > $maxHeaderSize) {
-                $headersFile = $this->createTempFile('curl_impersonate_request_headers');
-                $content = implode("\n", $headerLines) . "\n";
-                if (file_put_contents($headersFile, $content) === false) {
-                    $this->deleteTempFile($headersFile);
-
-                    throw new RequestException('Failed to write request headers to temporary file');
-                }
-                $tempFiles[] = $headersFile;
-                $options['H'][] = "@$headersFile";
-            } else {
-                foreach ($headerLines as $headerLine) {
-                    $options['H'][] = $headerLine;
-                }
-            }
-        }
-
-        return [$options, $tempFiles];
+        return $options;
     }
 
     /**
@@ -421,15 +515,15 @@ final class CurlProcess
     }
 
     /**
-     * Merge a browser's fingerprint config into the curl options.
+     * Merge a browser's fingerprint config into the curl options. The profile's
+     * headers are handled by {@see collectHeaderLines()} instead, so that every
+     * header reaches curl through one file in the right order.
      *
      * @param array<string,mixed> $options
      * @param array<string,mixed> $browserConfig
-     * @param list<array-key> $callerHeaderNames Header names the caller supplied;
-     *                                           the profile never re-adds these.
      * @return array<string,mixed>
      */
-    private function mergeBrowserConfig(array $options, array $browserConfig, array $callerHeaderNames = []): array
+    private function mergeBrowserConfig(array $options, array $browserConfig): array
     {
         if (isset($browserConfig['ciphers'])) {
             $options['ciphers'] = $browserConfig['ciphers'];
@@ -439,26 +533,6 @@ final class CurlProcess
         }
         if (isset($browserConfig['signature-hashes'])) {
             $options['signature-hashes'] = $browserConfig['signature-hashes'];
-        }
-
-        if (isset($browserConfig['headers'])) {
-            // A caller header REPLACES the profile's, it does not add to it.
-            // curl sends every -H it receives, so emitting both would put two
-            // User-Agent lines on the wire — a bot signal in its own right, and
-            // a silent divergence from the FFI engine, where libcurl replaces
-            // a profile header by name. Names are matched case-insensitively
-            // (RFC 9110 §5.1).
-            $supplied = [];
-            foreach ($callerHeaderNames as $name) {
-                $supplied[strtolower((string) $name)] = true;
-            }
-
-            foreach ($browserConfig['headers'] as $name => $value) {
-                if (isset($supplied[strtolower((string) $name)])) {
-                    continue;
-                }
-                $options['H'][] = "$name: $value";
-            }
         }
 
         if (isset($browserConfig['options'])) {
@@ -493,7 +567,7 @@ final class CurlProcess
             2 => ['pipe', 'w'],  // stderr
         ];
 
-        $displayCommand = implode(' ', $command);
+        $displayCommand = self::redactCommand($command);
 
         $process = proc_open($command, $descriptorspec, $pipes);
 
@@ -573,6 +647,43 @@ final class CurlProcess
         $exitCode = proc_close($process);
 
         return $this->processCommandOutput($output, $errors, $exitCode, $command);
+    }
+
+    /**
+     * A printable form of the argv, for error messages.
+     *
+     * Credentials and headers no longer reach argv at all (they go through
+     * 0600 temp files), but a URL can still carry userinfo or a token in its
+     * query string, and this string is stored on the exception — where it tends
+     * to end up in logs. Mask what looks like a credential.
+     *
+     * @param list<string> $command
+     */
+    private static function redactCommand(array $command): string
+    {
+        $redacted = [];
+        $maskNext = false;
+
+        foreach ($command as $arg) {
+            if ($maskNext) {
+                $redacted[] = '***';
+                $maskNext = false;
+
+                continue;
+            }
+
+            if (in_array($arg, ['--proxy', '-x', '--proxy-user', '-U'], true)) {
+                $maskNext = true;
+                $redacted[] = $arg;
+
+                continue;
+            }
+
+            // scheme://user:secret@host/… -> scheme://***@host/…
+            $redacted[] = preg_replace('#^([a-zA-Z][\w+.-]*://)[^/@\s]+@#', '$1***@', $arg) ?? $arg;
+        }
+
+        return implode(' ', $redacted);
     }
 
     /**

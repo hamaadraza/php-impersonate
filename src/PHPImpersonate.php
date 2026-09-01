@@ -52,8 +52,15 @@ class PHPImpersonate implements ClientInterface
     private string $engine;
     private ?CurlProcess $processEngine = null;
 
-    /** Cached one-time FFI load probe. */
+    /**
+     * Cached FFI load probe, together with the library path it was taken
+     * against. Keying it means a library installed mid-process — picked up after
+     * {@see LibResolver::clearCache()} — is probed afresh instead of being masked
+     * by the earlier "no library" result. Only the expensive part (FFI::cdef plus
+     * handle init) is cached; the cheap checks in front of it re-run each call.
+     */
     private static ?bool $ffiProbe = null;
+    private static ?string $ffiProbedLib = null;
 
     /**
      * FFI engines shared process-wide, keyed by (library, browser, options).
@@ -134,25 +141,29 @@ class PHPImpersonate implements ClientInterface
      */
     public static function ffiAvailable(): bool
     {
-        if (self::$ffiProbe !== null) {
-            return self::$ffiProbe;
-        }
         if (! CurlImpersonate::isSupported()) {
-            return self::$ffiProbe = false;
+            return false;
         }
+
+        // Memoised, so this is a cheap lookup rather than a filesystem walk.
         $lib = LibResolver::resolve();
         if ($lib === null) {
-            return self::$ffiProbe = false;
+            return false;
         }
+
+        if (self::$ffiProbe !== null && self::$ffiProbedLib === $lib) {
+            return self::$ffiProbe;
+        }
+
+        self::$ffiProbedLib = $lib;
 
         try {
             new CurlImpersonate($lib); // probe that the library loads (FFI::cdef + init)
-            self::$ffiProbe = true;
-        } catch (\Throwable $e) {
-            self::$ffiProbe = false;
-        }
 
-        return self::$ffiProbe;
+            return self::$ffiProbe = true;
+        } catch (\Throwable) {
+            return self::$ffiProbe = false;
+        }
     }
 
     /**
@@ -370,6 +381,10 @@ class PHPImpersonate implements ClientInterface
      * fingerprint for the second, silently defeating impersonation. Isolating by
      * config keeps same-config requests fast (connection reuse) while never
      * leaking a fingerprint between browsers.
+     *
+     * The options were canonicalised — values and key order — by
+     * {@see CurlOptions::normalize()}, so two spellings of one configuration
+     * share an engine rather than minting two.
      */
     private function ffiEngine(): CurlImpersonate
     {

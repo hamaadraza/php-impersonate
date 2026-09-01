@@ -4,22 +4,30 @@ namespace Raza\PHPImpersonate;
 
 class Request
 {
+    private string $method;
+
     /**
-     * @param string $method HTTP method
+     * @param string $method HTTP method; normalised to upper case
      * @param string $url The URL to request
      * @param array<string,string> $headers Request headers
      * @param string|null $body Request body content
      */
     public function __construct(
-        private string $method,
+        string $method,
         private string $url,
         private array $headers = [],
         private ?string $body = null
     ) {
+        // Normalise here, at the one boundary every request passes through, so
+        // no engine has to remember to. The FFI engine already uppercased before
+        // CURLOPT_CUSTOMREQUEST while the executable engine passed -X through
+        // verbatim, so `new Request('get', …)` reached the server as GET on one
+        // engine and as `get` — a 400 from most servers — on the other.
+        $this->method = strtoupper($method);
     }
 
     /**
-     * Get the request method
+     * Get the request method (upper case)
      *
      * @return string
      */

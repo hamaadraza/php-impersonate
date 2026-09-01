@@ -45,20 +45,62 @@ final class Http
         if ($in === false) {
             throw new \RuntimeException("Download failed: $url");
         }
-        $out = fopen($destPath, 'wb');
-        stream_copy_to_stream($in, $out);
+
+        $out = @fopen($destPath, 'wb');
+        if ($out === false) {
+            fclose($in);
+
+            throw new \RuntimeException("Cannot write to $destPath");
+        }
+
+        $copied = stream_copy_to_stream($in, $out);
         fclose($in);
         fclose($out);
+
+        if ($copied === false) {
+            throw new \RuntimeException("Download failed while writing $destPath");
+        }
+    }
+
+    /**
+     * Locate an executable on PATH, or null when it is not there.
+     *
+     * Both the lookup command and the null device are platform-specific:
+     * `2>/dev/null` means nothing to cmd.exe, which treats it as a redirect into
+     * a file called \dev\null and fails.
+     */
+    public static function which(string $command): ?string
+    {
+        $lookup = self::isWindows() ? 'where' : 'command -v';
+
+        $out = @shell_exec($lookup . ' ' . escapeshellarg($command) . ' 2>' . self::nullDevice());
+        $path = is_string($out) ? trim((string) strtok($out, "\n")) : '';
+
+        return $path !== '' ? $path : null;
+    }
+
+    /**
+     * The platform's null device, for redirecting away unwanted output.
+     */
+    public static function nullDevice(): string
+    {
+        return self::isWindows() ? 'nul' : '/dev/null';
+    }
+
+    private static function isWindows(): bool
+    {
+        return stripos(PHP_OS, 'WIN') === 0;
     }
 
     /**
      * Returns the body (when $destPath is null) or empty string on success
-     * writing to a file; null if the curl CLI is unavailable so the caller
-     * can fall back.
+     * writing to a file; null when curl could not deliver it — either because
+     * the CLI is unavailable or because the transfer itself failed — so the
+     * caller falls back to PHP streams rather than giving up.
      */
     private static function viaCurl(string $url, ?string $destPath): ?string
     {
-        $curl = self::findCurl();
+        $curl = self::which('curl');
         if ($curl === null) {
             return null;
         }
@@ -67,24 +109,16 @@ final class Http
         if ($destPath !== null) {
             $cmd .= ' -o ' . escapeshellarg($destPath);
         }
-        $cmd .= ' ' . escapeshellarg($url) . ' 2>/dev/null';
+        $cmd .= ' ' . escapeshellarg($url) . ' 2>' . self::nullDevice();
 
         $out = [];
         $code = 0;
-        exec($cmd . ($destPath === null ? '' : ' && echo OK'), $out, $code);
+        exec($cmd, $out, $code);
+
         if ($code !== 0) {
-            throw new \RuntimeException("Download failed (curl exit $code): $url");
+            return null;
         }
 
         return $destPath === null ? implode("\n", $out) : '';
-    }
-
-    private static function findCurl(): ?string
-    {
-        $which = stripos(PHP_OS, 'WIN') === 0 ? 'where' : 'command -v';
-        $out = @shell_exec("$which curl 2>/dev/null");
-        $path = $out ? trim(strtok($out, "\n")) : '';
-
-        return $path !== '' ? $path : null;
     }
 }

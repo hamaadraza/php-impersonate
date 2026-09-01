@@ -121,23 +121,6 @@ class PlatformTest extends TestCase
     }
 
     /**
-     * Test file extension
-     */
-    public function testFileExtension()
-    {
-        $extension = PlatformDetector::getFileExtension();
-
-        $this->assertIsString($extension);
-
-        $platform = PlatformDetector::getPlatform();
-        if ($platform === PlatformDetector::PLATFORM_WINDOWS) {
-            $this->assertEquals('.exe', $extension);
-        } else {
-            $this->assertEquals('', $extension);
-        }
-    }
-
-    /**
      * Test platform description
      */
     public function testPlatformDescription()

@@ -195,21 +195,6 @@ class PlatformDetector
     }
 
     /**
-     * Get the file extension for the current platform
-     */
-    public static function getFileExtension(): string
-    {
-        $platform = self::getPlatform();
-
-        return match ($platform) {
-            self::PLATFORM_WINDOWS => '.exe',
-            self::PLATFORM_LINUX => '',
-            self::PLATFORM_MACOS => '',
-            default => '',
-        };
-    }
-
-    /**
      * Get a human-readable description of the current platform
      */
     public static function getPlatformDescription(): string

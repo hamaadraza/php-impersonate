@@ -95,6 +95,8 @@ final class BinaryInstaller
                 @chmod($dest, 0755);
             }
 
+            $this->stripSymbols($dest, $dir);
+
             $verified = false;
             $note = 'installed';
             if ($spec['executable'] && $this->isHostPlatform($dir)) {
@@ -178,6 +180,8 @@ final class BinaryInstaller
             }
             @chmod($dest, 0644);
 
+            $this->stripSymbols($dest, $dir);
+
             return ['message' => 'library installed (' . $this->humanSize(filesize($dest) ?: 0) . ')'];
         } finally {
             $this->rmrf($work);
@@ -218,6 +222,34 @@ final class BinaryInstaller
         return $best;
     }
 
+    /**
+     * Drop debug symbols from a freshly installed artifact.
+     *
+     * Upstream's Linux builds ship unstripped: the x86_64 executable and shared
+     * library are about 29 MB each, and roughly 5 MB once stripped — so this is
+     * most of the package's download size, for symbols nothing here uses.
+     * Verified not to change behaviour or the TLS/HTTP2 fingerprints.
+     *
+     * Only the host platform is touched, because `strip` cannot be relied on to
+     * understand another platform's object format; the macOS and Windows
+     * artifacts arrive stripped already. Best-effort: a missing `strip` leaves a
+     * larger but perfectly working binary.
+     */
+    private function stripSymbols(string $path, string $dir): void
+    {
+        if (! $this->isHostPlatform($dir) || str_starts_with($dir, 'windows')) {
+            return;
+        }
+
+        $strip = Http::which('strip');
+        if ($strip === null) {
+            return;
+        }
+
+        $flag = str_starts_with($dir, 'macos') ? ' -x ' : ' --strip-unneeded ';
+        @exec(escapeshellarg($strip) . $flag . escapeshellarg($path) . ' 2>' . Http::nullDevice());
+    }
+
     private function humanSize(int $bytes): string
     {
         if ($bytes >= 1048576) {
@@ -234,7 +266,7 @@ final class BinaryInstaller
         $tar = $this->findTar();
         if ($tar !== null) {
             $cmd = escapeshellarg($tar) . ' -xzf ' . escapeshellarg($archive)
-                . ' -C ' . escapeshellarg($destDir) . ' 2>/dev/null';
+                . ' -C ' . escapeshellarg($destDir) . ' 2>' . Http::nullDevice();
             exec($cmd, $out, $code);
             if ($code === 0) {
                 return;
@@ -266,14 +298,14 @@ final class BinaryInstaller
 
     private function verify(string $path): bool
     {
-        $out = @shell_exec(escapeshellarg($path) . ' --version 2>/dev/null');
+        $out = @shell_exec(escapeshellarg($path) . ' --version 2>' . Http::nullDevice());
 
         return is_string($out) && str_contains($out, 'IMPERSONATE');
     }
 
     private function versionString(string $path): string
     {
-        $out = @shell_exec(escapeshellarg($path) . ' --version 2>/dev/null');
+        $out = @shell_exec(escapeshellarg($path) . ' --version 2>' . Http::nullDevice());
         if (! is_string($out)) {
             return 'unknown';
         }
@@ -308,11 +340,7 @@ final class BinaryInstaller
 
     private function findTar(): ?string
     {
-        $which = stripos(PHP_OS, 'WIN') === 0 ? 'where' : 'command -v';
-        $out = @shell_exec("$which tar 2>/dev/null");
-        $path = $out ? trim(strtok($out, "\n")) : '';
-
-        return $path !== '' ? $path : null;
+        return Http::which('tar');
     }
 
     private function makeTempDir(): string

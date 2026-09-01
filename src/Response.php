@@ -95,7 +95,10 @@ class Response
     {
         foreach ($this->headers as $key => $values) {
             if (strcasecmp($key, $name) === 0) {
-                return $values[0];
+                // A present-but-empty value list means the same as absent to a
+                // caller asking for one value. The parser never produces one,
+                // but the constructor is public.
+                return $values[0] ?? $default;
             }
         }
 

@@ -338,6 +338,12 @@ Pass any of these names as the `$browser` argument (default **`firefox147`**):
 
 The authoritative list is always `Raza\PHPImpersonate\Browser\BrowserName::getAll()`.
 
+> [!NOTE]
+> `okhttp4_android` reproduces upstream's profile of the same name, and that
+> profile carries a **desktop Safari 17 `User-Agent`**, not an Android one — its
+> TLS fingerprint is OkHttp's, but it will not read as an Android client. Pass
+> your own `User-Agent` header if you need one that matches.
+
 ```php
 $client = new PHPImpersonate('safari184');
 $response = $client->sendGet('https://example.com');

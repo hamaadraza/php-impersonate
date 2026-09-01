@@ -6,27 +6,22 @@ use Raza\PHPImpersonate\Platform\PlatformDetector;
 
 class Configuration
 {
+    /**
+     * Per-platform settings. Only the PATH-lookup command lives here; the other
+     * keys this used to carry (file extension, path separator, executable check,
+     * temp dir) were never read by anything and are gone.
+     *
+     * @var array<string, array<string, mixed>>
+     */
     private static array $platformConfigs = [
         PlatformDetector::PLATFORM_LINUX => [
-            'file_extension' => '',
-            'path_separator' => '/',
-            'executable_check' => 'is_executable',
             'which_command' => 'which',
-            'temp_dir' => null, // Use system default
         ],
         PlatformDetector::PLATFORM_WINDOWS => [
-            'file_extension' => '.exe',
-            'path_separator' => '\\',
-            'executable_check' => 'file_exists', // Windows doesn't have is_executable
             'which_command' => 'where',
-            'temp_dir' => null, // Use system default
         ],
         PlatformDetector::PLATFORM_MACOS => [
-            'file_extension' => '',
-            'path_separator' => '/',
-            'executable_check' => 'is_executable',
             'which_command' => 'which',
-            'temp_dir' => null, // Use system default
         ],
     ];
 
@@ -48,14 +43,6 @@ class Configuration
         $config = self::getPlatformConfig();
 
         return $config[$key] ?? null;
-    }
-
-    /**
-     * Get the binary directory for the current platform and architecture
-     */
-    public static function getBinaryDir(): string
-    {
-        return PlatformDetector::getBinaryDir();
     }
 
     /**
@@ -82,21 +69,5 @@ class Configuration
                 ?? [],
             $config
         );
-    }
-
-    /**
-     * Get all supported platforms
-     */
-    public static function getSupportedPlatforms(): array
-    {
-        return array_keys(self::$platformConfigs);
-    }
-
-    /**
-     * Check if a platform has configuration
-     */
-    public static function hasPlatformConfig(string $platform): bool
-    {
-        return isset(self::$platformConfigs[$platform]);
     }
 }

@@ -51,6 +51,34 @@ class FfiEngineCacheTest extends TestCase
         $this->assertNotSame($second, $this->engineFor('ref1'), 'least recently used engine must be evicted');
     }
 
+    /**
+     * Two spellings of one configuration must share an engine. The key is built
+     * from the normalised options, and normalisation canonicalises key order —
+     * without that, each spelling pinned its own handle and connection pool.
+     */
+    public function testEquivalentOptionsInAnyOrderShareOneEngine(): void
+    {
+        $engine = fn (array $options): CurlImpersonate => $this->engineForOptions($options);
+
+        $first = $engine(['proxy' => 'http://127.0.0.1:8080', 'max-redirs' => 3]);
+        $second = $engine(['max-redirs' => 3, 'proxy' => 'http://127.0.0.1:8080']);
+
+        $this->assertSame($first, $second, 'option order must not change the cache key');
+        $this->assertCount(1, $this->cachedEngines());
+    }
+
+    /**
+     * Loose values are canonicalised too, so `'3'` and `3` are one configuration.
+     */
+    public function testEquivalentOptionValuesShareOneEngine(): void
+    {
+        $this->assertSame(
+            $this->engineForOptions(['max-redirs' => 3, 'insecure' => true]),
+            $this->engineForOptions(['max-redirs' => '3', 'insecure' => 'yes'])
+        );
+        $this->assertCount(1, $this->cachedEngines());
+    }
+
     public function testCloseFfiEnginesEmptiesCache(): void
     {
         $engine = $this->engineFor('ref0');
@@ -67,7 +95,17 @@ class FfiEngineCacheTest extends TestCase
      */
     private function engineFor(string $referer): CurlImpersonate
     {
-        $client = new PHPImpersonate('chrome146', 30, ['referer' => "https://$referer.test/"], PHPImpersonate::ENGINE_FFI);
+        return $this->engineForOptions(['referer' => "https://$referer.test/"]);
+    }
+
+    /**
+     * Resolve the cached engine for a client with the given options.
+     *
+     * @param array<string,mixed> $curlOptions
+     */
+    private function engineForOptions(array $curlOptions): CurlImpersonate
+    {
+        $client = new PHPImpersonate('chrome146', 30, $curlOptions, PHPImpersonate::ENGINE_FFI);
 
         $method = (new ReflectionClass(PHPImpersonate::class))->getMethod('ffiEngine');
         $method->setAccessible(true);

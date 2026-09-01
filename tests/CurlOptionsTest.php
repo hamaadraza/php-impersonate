@@ -124,6 +124,22 @@ class CurlOptionsTest extends TestCase
         $this->assertSame($once, CurlOptions::normalize($once));
     }
 
+    /**
+     * Key order is part of the canonical form. Curl does not care in what order
+     * it is handed independent options, but the FFI engine cache keys on the
+     * serialised result — so two spellings of one configuration would otherwise
+     * mint two engines, each with its own handle and connection pool.
+     */
+    public function testNormalizeCanonicalisesKeyOrder(): void
+    {
+        $a = CurlOptions::normalize(['proxy' => 'http://p:1', 'insecure' => true, 'max-redirs' => 3]);
+        $b = CurlOptions::normalize(['max-redirs' => 3, 'proxy' => 'http://p:1', 'insecure' => true]);
+
+        $this->assertSame($a, $b);
+        $this->assertSame(['insecure', 'max-redirs', 'proxy'], array_keys($a));
+        $this->assertSame(serialize($a), serialize($b), 'the FFI cache key must not depend on key order');
+    }
+
     public function testNormalizeSkipsUnknownKeys(): void
     {
         $this->assertSame(['proxy' => 'http://p:1'], CurlOptions::normalize([

@@ -137,6 +137,11 @@ final class CurlOptions
      * engine, while the executable engine would render it as `--insecure no`,
      * which both enables the flag and hands curl `no` as an extra URL to fetch.
      *
+     * Key order is canonical too. Curl does not care in what order it is handed
+     * independent options, but the FFI engine cache keys on the serialised
+     * result — so without this, two spellings of one configuration would mint
+     * two engines, each with its own handle and connection pool.
+     *
      * @param array<string,mixed> $curlOptions Already checked by {@see assertAllowed()}.
      * @return array<string,bool|int|string>
      */
@@ -173,6 +178,8 @@ final class CurlOptions
                     break;
             }
         }
+
+        ksort($normalized);
 
         return $normalized;
     }

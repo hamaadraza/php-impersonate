@@ -93,13 +93,16 @@ final class LibResolver
     /**
      * Possible library filenames for the current platform.
      *
+     * Windows is deliberately absent: the FFI engine is POSIX-only because it
+     * captures responses through open_memstream, so
+     * {@see \Raza\PHPImpersonate\Ffi\CurlImpersonate::isSupported()} refuses
+     * Windows before anything gets here. Add the DLL names back if that ever
+     * changes.
+     *
      * @return list<string>
      */
     private static function libraryNames(): array
     {
-        if (PlatformDetector::isWindows()) {
-            return ['libcurl-impersonate.dll', 'libcurl.dll'];
-        }
         if (PlatformDetector::isMacOS()) {
             return ['libcurl-impersonate.dylib', 'libcurl-impersonate.4.dylib'];
         }

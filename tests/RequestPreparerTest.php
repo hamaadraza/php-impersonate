@@ -60,6 +60,44 @@ class RequestPreparerTest extends TestCase
         $this->assertSame($once, RequestPreparer::normalizeHeaders($once));
     }
 
+    /**
+     * The method is normalised at construction so neither engine has to. The FFI
+     * engine uppercased before CURLOPT_CUSTOMREQUEST while the executable engine
+     * passed -X through verbatim, so `new Request('get', …)` used to reach the
+     * server as GET on one engine and as `get` — a 400 — on the other.
+     */
+    #[DataProvider('methodCasingProvider')]
+    public function testRequestMethodIsNormalisedToUpperCase(string $given, string $expected): void
+    {
+        $this->assertSame($expected, (new Request($given, 'https://example.com'))->getMethod());
+    }
+
+    /**
+     * @return array<string, array{0: string, 1: string}>
+     */
+    public static function methodCasingProvider(): array
+    {
+        return [
+            'lowercase' => ['get', 'GET'],
+            'mixed case' => ['Post', 'POST'],
+            'already upper' => ['DELETE', 'DELETE'],
+            'lowercase head' => ['head', 'HEAD'],
+        ];
+    }
+
+    public function testNamedConstructorsKeepUpperCaseMethods(): void
+    {
+        $this->assertSame('GET', Request::get('https://example.com')->getMethod());
+        $this->assertSame('PATCH', Request::patch('https://example.com')->getMethod());
+    }
+
+    public function testMethodNormalisationSurvivesWithers(): void
+    {
+        $request = (new Request('put', 'https://example.com'))->withBody('x')->withHeaders(['A' => 'b']);
+
+        $this->assertSame('PUT', $request->getMethod());
+    }
+
     public function testFindHeaderValueIsCaseInsensitive(): void
     {
         $headers = ['content-type' => 'application/json'];

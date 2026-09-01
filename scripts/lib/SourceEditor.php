@@ -9,8 +9,13 @@ namespace Raza\PHPImpersonate\Scripts;
  */
 final class SourceEditor
 {
+    /**
+     * The files that declare a `@phpstan-type BrowserName` union. Every one of
+     * them must actually contain the docblock — {@see rewriteBrowserNameUnions()}
+     * fails if it does not, rather than quietly rewriting nothing.
+     * `Browser/BrowserName.php` is not here: it carries the constants, not a union.
+     */
     private const UNION_FILES = [
-        'Browser/BrowserName.php',
         'PHPImpersonate.php',
         'PHPImpersonateFactory.php',
     ];
@@ -102,7 +107,15 @@ final class SourceEditor
                 -1,
                 $count
             );
-            if ($count > 0 && $new !== $src) {
+
+            // Loudly, not silently: a rewrite that matches nothing means the
+            // docblock moved or was renamed, and the union would otherwise be
+            // left stale while the script reported success.
+            if ($new === null || $count === 0) {
+                throw new \RuntimeException("No @phpstan-type BrowserName union found in $rel");
+            }
+
+            if ($new !== $src) {
                 $this->write($file, $new);
             }
         }

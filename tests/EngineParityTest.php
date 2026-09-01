@@ -37,6 +37,11 @@ class EngineParityTest extends TestCase
             'chrome150' => ['chrome150'],
             'safari184' => ['safari184'],
             'okhttp4_android' => ['okhttp4_android'],
+            // Hand-written rather than generated from upstream, so they are the
+            // ones most likely to drift out of step with the shared library.
+            'firefox133 (hand-written)' => ['firefox133'],
+            'firefox135 (hand-written)' => ['firefox135'],
+            'tor145 (hand-written)' => ['tor145'],
         ];
     }
 

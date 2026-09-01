@@ -5,6 +5,7 @@ namespace Raza\PHPImpersonate\Tests;
 use InvalidArgumentException;
 use PHPUnit\Framework\TestCase;
 use Raza\PHPImpersonate\PHPImpersonate;
+use Raza\PHPImpersonate\Ffi\LibResolver;
 use Raza\PHPImpersonate\Exception\RequestException;
 
 /**
@@ -80,6 +81,42 @@ class EngineSelectionTest extends TestCase
             } catch (InvalidArgumentException $e) {
                 $this->assertStringContainsString('Unsupported curl option', $e->getMessage());
             }
+        }
+    }
+
+    /**
+     * A negative probe must not outlive the library resolution it was based on.
+     * The probe used to be cached unconditionally, so once ffiAvailable() had
+     * returned false it kept returning false for the life of the process — even
+     * after LibResolver::clearCache(), which exists precisely so a library
+     * installed mid-process gets picked up.
+     */
+    public function testProbeIsReevaluatedWhenTheResolvedLibraryChanges(): void
+    {
+        if (! PHPImpersonate::ffiAvailable()) {
+            $this->markTestSkipped('Needs a working FFI engine to invalidate.');
+        }
+
+        $saved = getenv(LibResolver::ENV_VAR);
+
+        try {
+            // Point at a library that cannot load, and re-resolve.
+            $bogus = (string) tempnam(sys_get_temp_dir(), 'not_a_library');
+            file_put_contents($bogus, "definitely not an ELF object\n");
+            putenv(LibResolver::ENV_VAR . '=' . $bogus);
+            LibResolver::clearCache();
+
+            $this->assertFalse(PHPImpersonate::ffiAvailable(), 'a broken library must probe as unavailable');
+
+            // Restore, and the probe must recover rather than stay stuck on false.
+            $saved === false ? putenv(LibResolver::ENV_VAR) : putenv(LibResolver::ENV_VAR . "=$saved");
+            LibResolver::clearCache();
+            @unlink($bogus);
+
+            $this->assertTrue(PHPImpersonate::ffiAvailable(), 'the probe must re-run once the library resolves again');
+        } finally {
+            $saved === false ? putenv(LibResolver::ENV_VAR) : putenv(LibResolver::ENV_VAR . "=$saved");
+            LibResolver::clearCache();
         }
     }
 

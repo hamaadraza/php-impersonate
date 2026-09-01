@@ -133,12 +133,19 @@ final class CurlImpersonate
         // Reset per request but keep the connection cache on this handle.
         $ffi->curl_easy_reset($h);
 
-        [$bodyFp, $readBody] = $this->openSink();
-        [$hdrFp, $readHeaders] = $this->openSink();
-
+        // Opened inside the try, and each reader registered the moment it exists,
+        // so a failure opening the second sink still releases the first. Left
+        // above the try, that FILE* and its malloc'd buffer leaked.
+        $readers = [];
         $slist = null;
 
         try {
+            [$bodyFp, $readBody] = $this->openSink();
+            $readers[] = $readBody;
+
+            [$hdrFp, $readHeaders] = $this->openSink();
+            $readers[] = $readHeaders;
+
             $ffi->curl_easy_setopt($h, self::CURLOPT_URL, $url);
             $ffi->curl_easy_setopt($h, self::CURLOPT_FOLLOWLOCATION, 1);
             // Cap redirects to match the executable engine (curl's tool default);
@@ -210,8 +217,9 @@ final class CurlImpersonate
             if ($slist !== null) {
                 $ffi->curl_slist_free_all($slist);
             }
-            $readBody(true);
-            $readHeaders(true);
+            foreach ($readers as $reader) {
+                $reader(true);
+            }
         }
     }
 

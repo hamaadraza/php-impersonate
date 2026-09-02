@@ -32,6 +32,16 @@ if (extension_loaded('curl')) {
     $v = curl_version();
     echo 'ext-curl links libcurl ', $v['version'], ' / ', $v['ssl_version'], ' (a second libcurl in this process)', PHP_EOL;
 }
+
+try {
+    // Resolvable without naming a library = defined by the php executable or a
+    // library in its global scope. If that is a stock libcurl, the impersonate
+    // library's own calls may bind to it (see CurlImpersonate::bindSymbolsLocally()).
+    FFI::cdef('int curl_easy_setopt(void *h, int o, ...);');
+    echo 'A curl_easy_setopt() is reachable in the global symbol scope (a libcurl is linked into, or exported by, this php binary).', PHP_EOL;
+} catch (\Throwable) {
+    echo 'No curl_easy_setopt() in the global symbol scope (ext-curl absent or loaded as a module).', PHP_EOL;
+}
 echo 'Library: ', $lib ?? '(none resolved)', PHP_EOL, PHP_EOL;
 
 if ($lib === null) {

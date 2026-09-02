@@ -209,8 +209,10 @@ class PHPImpersonate implements ClientInterface
                 $rc,
                 $rc === 48
                     ? 'Code 48 (CURLE_UNKNOWN_OPTION) from a known target means the library\'s own setopt calls '
-                        . 'reached a different libcurl — typically the one compiled into this PHP binary for '
-                        . 'ext-curl, which precedes the shared library in the symbol lookup on this platform.'
+                        . 'reached a different libcurl — the one compiled into this php binary for ext-curl. '
+                        . 'On glibc the library is loaded with RTLD_DEEPBIND to prevent exactly this, so on '
+                        . 'this platform (musl, or a build where dlopen is not reachable) it cannot be prevented; '
+                        . 'the executable engine is used instead. Run scripts/ffi-diagnose.php for details.'
                     : 'The library may be older than this package\'s browser list; refresh it with `composer update-libraries`.'
             );
 

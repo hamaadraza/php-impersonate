@@ -381,5 +381,11 @@ jobs:
           curl -sf http://localhost:8080/status/200 >/dev/null || { echo "httpbin did not come up"; docker logs httpbin; exit 1; }
           echo "HTTPBIN_URL=http://localhost:8080" >> "$GITHUB_ENV"
 
+      # The FFI symbol-interposition tests build small C fixtures with gcc,
+      # which the Linux runners have (plain ext4, no WSL/9p stalls).
+      - name: Opt in to the C-fixture tests
+        if: runner.os == 'Linux'
+        run: echo "PHP_IMPERSONATE_BUILD_FIXTURES=1" >> "$GITHUB_ENV"
+
       - name: Execute tests
         run: vendor/bin/pest --ci

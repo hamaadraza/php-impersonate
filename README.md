@@ -182,13 +182,16 @@ platform (bundled for [common platforms](#supported-platforms);
 > for you; the fingerprints are identical either way.
 
 > [!WARNING]
-> **Official `php:*-alpine` Docker images**: their `php` binary has ext-curl's
-> libcurl compiled in, and on musl the bundled `libcurl-impersonate` then
-> cannot apply a profile (its own internal calls resolve to that built-in
-> libcurl). `ffiAvailable()` detects this — it checks that the default profile
-> actually applies, not just that the library loads — and `auto` uses the
-> executable engine instead. `ffiUnavailableReason()` spells it out. The glibc
-> images and every non-Docker install are unaffected.
+> **A libcurl compiled into the `php` binary** (ext-curl built in rather than
+> loaded as a module: the official Docker images, some source builds) sits
+> ahead of the bundled `libcurl-impersonate` in the dynamic linker's symbol
+> lookup, so the library's own internal calls could land in that stock libcurl
+> — which answers `CURLE_UNKNOWN_OPTION` and corrupts the handle. On **glibc**
+> the library is loaded with `RTLD_DEEPBIND`, which makes it bind to itself, and
+> the FFI engine works. On **musl (Alpine)** there is no such flag:
+> `ffiAvailable()` detects the situation (it checks that the default profile
+> actually applies, not just that the library loads), `auto` uses the executable
+> engine, and `ffiUnavailableReason()` spells it out. Nothing crashes either way.
 
 ---
 

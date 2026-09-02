@@ -59,6 +59,7 @@ final class CurlImpersonate
 
     private const CURLE_OK = 0;
     private const CURLE_TOO_MANY_REDIRECTS = 47;
+    private const CURLE_UNKNOWN_OPTION = 48;
 
     /** Match the curl command-line tool's default redirect cap (the executable engine). */
     private const MAX_REDIRECTS = 50;
@@ -91,8 +92,22 @@ final class CurlImpersonate
     /** @var \FFI\CData|null Reused easy handle for connection keep-alive. */
     private $handle;
 
+    /**
+     * Set once curl_easy_impersonate() has answered CURLE_UNKNOWN_OPTION on
+     * this handle. See {@see markForeignLibcurl()}: the handle may then have
+     * been written to by a different libcurl with a different struct layout,
+     * and freeing it is what turns a wrong answer into a segmentation fault.
+     */
+    private bool $touchedByForeignLibcurl = false;
+
+    /** glibc's dlopen(3) flags. RTLD_DEEPBIND does not exist on musl or macOS. */
+    private const RTLD_NOW = 0x2;
+    private const RTLD_DEEPBIND = 0x8;
+
     public function __construct(string $libPath)
     {
+        self::bindSymbolsLocally($libPath);
+
         $this->ffi = FFI::cdef(self::HEADER, $libPath);
         $this->handle = $this->ffi->curl_easy_init();
         if ($this->handle === null) {
@@ -102,10 +117,69 @@ final class CurlImpersonate
 
     public function __destruct()
     {
-        if ($this->handle !== null) {
-            $this->ffi->curl_easy_cleanup($this->handle);
-            $this->handle = null;
+        if ($this->handle === null) {
+            return;
         }
+
+        // A handle another libcurl has written into must not be handed back
+        // to this one to free: that is the crash. Leaking one easy handle is
+        // the lesser harm, and the engine is unavailable at that point anyway.
+        if (! $this->touchedByForeignLibcurl) {
+            $this->ffi->curl_easy_cleanup($this->handle);
+        }
+
+        $this->handle = null;
+    }
+
+    /**
+     * Load the library so that its OWN definitions win for its internal calls.
+     *
+     * libcurl-impersonate calls curl_easy_setopt() and friends through the
+     * PLT. When the php executable itself defines those names — ext-curl
+     * compiled into the binary rather than loaded as a module, which is how
+     * setup-php builds PHP 8.5 and how the official Docker images build every
+     * version — the executable's symbols take precedence over the library's
+     * for the library's own calls. curl_easy_impersonate() then hands its
+     * options to a stock libcurl: it answers CURLE_UNKNOWN_OPTION (48) and,
+     * worse, writes into a handle whose struct layout it does not share, so
+     * the process crashes later in curl_easy_cleanup(). A library loaded as a
+     * shared object (a module's dependency) does NOT interpose this way, which
+     * is why the problem only shows on some builds.
+     *
+     * RTLD_DEEPBIND makes the dynamic linker search the library itself before
+     * the global scope, which is exactly the binding a self-contained library
+     * needs. FFI::cdef() reuses the mapping this dlopen() creates, flags
+     * included. glibc only: musl has no such flag (there, {@see probeTarget()}
+     * detects the problem and the engine is reported unavailable) and macOS
+     * does not need it (its two-level namespace already binds locally).
+     * Verified against an executable that defines curl_easy_setopt(): 48
+     * without this, 0 with it.
+     */
+    private static function bindSymbolsLocally(string $libPath): void
+    {
+        if (! PlatformDetector::isLinux() || PlatformDetector::isMusl()) {
+            return;
+        }
+
+        try {
+            $libc = FFI::cdef('void *dlopen(const char *filename, int flags);');
+            // Deliberately never dlclose()d: the mapping must outlive every
+            // handle, and FFI holds its own reference for the process anyway.
+            $libc->dlopen($libPath, self::RTLD_NOW | self::RTLD_DEEPBIND);
+        } catch (\Throwable) {
+            // dlopen not reachable through FFI on this build: proceed without
+            // the pre-binding; the functional probe still guards the outcome.
+        }
+    }
+
+    /**
+     * Record that curl_easy_impersonate() returned CURLE_UNKNOWN_OPTION, which
+     * from a known target means its internal setopt calls reached a different
+     * libcurl. Nothing is trusted about this handle afterwards.
+     */
+    private function markForeignLibcurl(): void
+    {
+        $this->touchedByForeignLibcurl = true;
     }
 
     /**
@@ -127,7 +201,12 @@ final class CurlImpersonate
     {
         $this->ffi->curl_easy_reset($this->handle);
 
-        return (int) $this->ffi->curl_easy_impersonate($this->handle, $browser, 1);
+        $rc = (int) $this->ffi->curl_easy_impersonate($this->handle, $browser, 1);
+        if ($rc === self::CURLE_UNKNOWN_OPTION) {
+            $this->markForeignLibcurl();
+        }
+
+        return $rc;
     }
 
     /**
@@ -297,6 +376,9 @@ final class CurlImpersonate
             // applies nothing — without this check the request would silently go
             // out with a plain libcurl fingerprint, defeating the whole purpose.
             $rc = $ffi->curl_easy_impersonate($h, $browser, 1);
+            if ($rc === self::CURLE_UNKNOWN_OPTION) {
+                $this->markForeignLibcurl();
+            }
             if ($rc !== self::CURLE_OK) {
                 throw new RequestException(
                     "libcurl-impersonate does not support target '$browser' ($rc). "

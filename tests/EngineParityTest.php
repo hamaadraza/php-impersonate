@@ -5,6 +5,7 @@ namespace Raza\PHPImpersonate\Tests;
 use PHPUnit\Framework\TestCase;
 use Raza\PHPImpersonate\Request;
 use Raza\PHPImpersonate\PHPImpersonate;
+use Raza\PHPImpersonate\Browser\BrowserName;
 use PHPUnit\Framework\Attributes\DataProvider;
 
 /**
@@ -32,7 +33,15 @@ class EngineParityTest extends TestCase
      */
     public static function browserProvider(): array
     {
-        return self::ja4BrowserProvider() + [
+        // Every profile. Header VALUES are compared against a local httpbin, so
+        // this is cheap — and it covered only 11 of 39 while safari170, one of
+        // the other 28, went out with three headers missing.
+        $all = [];
+        foreach (BrowserName::getAll() as $name) {
+            $all[$name] = [$name];
+        }
+
+        return $all + self::ja4BrowserProvider() + [
             // Profiles flagged during review as possibly incoherent. Whether
             // their DATA is right is an upstream question — BrowserConfig is
             // generated from upstream's curl.patch — but whether this package

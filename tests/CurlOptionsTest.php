@@ -16,7 +16,7 @@ class CurlOptionsTest extends TestCase
     public function testAllowedKeysAreTheCuratedSet(): void
     {
         $this->assertSame(
-            ['proxy', 'proxy-user', 'noproxy', 'referer', 'cacert', 'capath', 'max-redirs', 'insecure'],
+            ['proxy', 'proxy-user', 'noproxy', 'referer', 'cacert', 'capath', 'max-redirs', 'max-filesize', 'insecure'],
             CurlOptions::allowedKeys()
         );
     }

@@ -36,6 +36,8 @@ final class CurlImpersonate
     private const CURLOPT_CAINFO = 10065;
     private const CURLOPT_ACCEPT_ENCODING = 10102;
     private const CURLOPT_SSL_SESSIONID_CACHE = 150;
+    private const CURLOPT_COOKIEFILE = 10031;
+    private const CURLOPT_COOKIELIST = 10135;
 
     /**
      * Long-typed protocol bitmask, deliberately in preference to the newer
@@ -158,6 +160,18 @@ final class CurlImpersonate
         // Reset per request but keep the connection cache on this handle.
         $ffi->curl_easy_reset($h);
 
+        // Cookies, in two steps that must both happen. curl_easy_reset() keeps
+        // the cookie jar, and this handle is shared by every client with the
+        // same (library, browser, options) key — so first WIPE whatever the
+        // previous request left, or one caller's session cookie would ride
+        // along on the next caller's request. Then enable the in-memory engine
+        // for this request, so a cookie set on a redirect hop (login → 302 +
+        // Set-Cookie → GET) is sent on the follow-up, as browsers do. Setting
+        // CURLOPT_COOKIEFILE to "" is libcurl's documented way to say "engine
+        // on, no file"; nothing touches disk.
+        $ffi->curl_easy_setopt($h, self::CURLOPT_COOKIEFILE, '');
+        $ffi->curl_easy_setopt($h, self::CURLOPT_COOKIELIST, 'ALL');
+
         // Opened inside the try, and each reader registered the moment it exists,
         // so a failure opening the second sink still releases the first. Left
         // above the try, that FILE* and its malloc'd buffer leaked.
@@ -197,6 +211,12 @@ final class CurlImpersonate
             }
             $ffi->curl_easy_setopt($h, self::CURLOPT_TIMEOUT_MS, $timeout * 1000);
             $ffi->curl_easy_setopt($h, self::CURLOPT_CONNECTTIMEOUT_MS, $timeout * 1000);
+            // The body is buffered whole in C memory that PHP's memory_limit
+            // cannot see, so it needs a cap (see CurlOptions::DEFAULT_MAX_FILESIZE).
+            // applyCurlOptions() below sets the caller's own value when given.
+            if (! isset($curlOptions['max-filesize'])) {
+                $ffi->curl_easy_setopt($h, CurlOptions::CURLOPT_MAXFILESIZE_LARGE, CurlOptions::DEFAULT_MAX_FILESIZE);
+            }
             $ffi->curl_easy_setopt($h, self::CURLOPT_WRITEDATA, $bodyFp);
             $ffi->curl_easy_setopt($h, self::CURLOPT_HEADERDATA, $hdrFp);
 

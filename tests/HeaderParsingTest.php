@@ -328,4 +328,36 @@ class HeaderParsingTest extends TestCase
             $result['Set-Cookie']
         );
     }
+
+    // -------------------------------------------------------------------------
+    // Set-Cookie across the whole redirect chain
+    // -------------------------------------------------------------------------
+
+    public function testSetCookieHeadersCollectsEveryHop(): void
+    {
+        $raw = implode("\r\n", [
+            'HTTP/1.1 302 Found',
+            'Location: /home',
+            'Set-Cookie: session=abc; Path=/; HttpOnly',
+            '',
+            'HTTP/1.1 200 OK',
+            'Content-Type: text/html',
+            'set-cookie: theme=dark',
+            '',
+        ]);
+
+        // The final block alone loses the session cookie — the one that
+        // matters — so the collector reads every block, case-insensitively.
+        $this->assertSame(['theme=dark'], $this->parseHeaders($raw)['set-cookie']);
+        $this->assertSame(
+            ['session=abc; Path=/; HttpOnly', 'theme=dark'],
+            ResponseHeaderParser::setCookieHeaders($raw)
+        );
+    }
+
+    public function testSetCookieHeadersIsEmptyWhenNoneWereSent(): void
+    {
+        $this->assertSame([], ResponseHeaderParser::setCookieHeaders("HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\n"));
+        $this->assertSame([], ResponseHeaderParser::setCookieHeaders(''));
+    }
 }

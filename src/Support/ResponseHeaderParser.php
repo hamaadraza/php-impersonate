@@ -111,6 +111,33 @@ final class ResponseHeaderParser
     }
 
     /**
+     * Every Set-Cookie value in the block, from EVERY response in the redirect
+     * chain, in wire order.
+     *
+     * {@see parse()} keeps only the final response's headers, which is right
+     * for everything except cookies: a session cookie is routinely set on the
+     * 302 that follows a login and never on the page it redirects to, so the
+     * final block alone loses it. Redirect responses carry no field but this
+     * one that a caller needs to persist.
+     *
+     * @return list<string>
+     */
+    public static function setCookieHeaders(string $headersContent): array
+    {
+        $cookies = [];
+
+        foreach (preg_split('/\r?\n/', $headersContent) ?: [] as $line) {
+            $colonPos = strpos($line, ':');
+
+            if ($colonPos !== false && strcasecmp(trim(substr($line, 0, $colonPos)), 'Set-Cookie') === 0) {
+                $cookies[] = trim(substr($line, $colonPos + 1));
+            }
+        }
+
+        return $cookies;
+    }
+
+    /**
      * The last section that is actually a header block.
      *
      * libcurl delivers TRAILER fields through the same callback as headers, and

@@ -4,6 +4,7 @@ namespace Raza\PHPImpersonate\Process;
 
 use Raza\PHPImpersonate\Support\CaBundle;
 use Raza\PHPImpersonate\Support\CurlOptions;
+use Raza\PHPImpersonate\Browser\BrowserConfig;
 use Raza\PHPImpersonate\Platform\CommandBuilder;
 use Raza\PHPImpersonate\Support\RequestPreparer;
 use Raza\PHPImpersonate\Browser\BrowserInterface;
@@ -247,12 +248,37 @@ final class CurlProcess
         $browserConfig = $this->browser->getConfig();
 
         $options = $this->buildCurlOptions($method, $outputFile, $headerFile);
-        $options = $this->mergeBrowserConfig($options, $browserConfig);
 
-        // Assemble and validate before creating any temp file, so a malformed
-        // header still surfaces as InvalidArgumentException and leaves nothing
-        // behind on disk.
-        $headerLines = $this->collectHeaderLines($headers, $browserConfig['headers'] ?? []);
+        if (BrowserConfig::matchesBuiltin($this->browser->getName(), $browserConfig)) {
+            // Let the binary apply its OWN profile, through the same
+            // curl_easy_impersonate() call the FFI engine makes. It sets the
+            // ciphers, curves, signature algorithms, extension order, HTTP/2
+            // settings AND the default headers, and libcurl merges the caller's
+            // headers into the profile's slots — so the two engines are
+            // byte-identical by construction rather than by data entry.
+            //
+            // Rendering BrowserConfig into --ciphers/--curves/--tls-* flags
+            // instead (the path below) is how five profiles drifted from the
+            // library unnoticed: firefox133/135 sent a TLS record_size_limit of
+            // 4001 (a hex value pasted as decimal), chrome116 sent an ECH
+            // extension Chrome 116 never had, safari2601 sent a session ticket,
+            // safari170 lacked its Sec-Fetch headers, and edge101 carried a
+            // different build number. JA4 does not encode most of that, so the
+            // parity tests stayed green.
+            $options['impersonate'] = $this->browser->getName();
+            $options['compressed'] = true;
+            $headerLines = $this->collectHeaderLines($headers, []);
+        } else {
+            // A custom BrowserInterface profile: the library has no table entry
+            // for it, so render it by hand. This is the only path where
+            // BrowserConfig-shaped data reaches the wire.
+            $options = $this->mergeBrowserConfig($options, $browserConfig);
+
+            // Assemble and validate before creating any temp file, so a malformed
+            // header still surfaces as InvalidArgumentException and leaves nothing
+            // behind on disk.
+            $headerLines = $this->collectHeaderLines($headers, $browserConfig['headers'] ?? []);
+        }
         [$credentials, $plainOptions] = $this->splitCredentialOptions($this->curlOptions);
 
         // Custom curl options (already validated and normalised).
@@ -487,6 +513,15 @@ final class CurlProcess
         $method = strtoupper($method);
 
         $options = [
+            // MUST stay the first argument. curl reads $CURL_HOME/.curlrc,
+            // $XDG_CONFIG_HOME/curlrc or ~/.curlrc unless -q/--disable LEADS
+            // argv, and a curlrc can add headers, a proxy, --insecure or a
+            // --data body to every request this engine sends — verified: a
+            // `header = "X-Injected-By: curlrc"` line reached the server, and a
+            // `proxy = …` line redirected every request. The FFI engine never
+            // reads it, so the two engines silently disagreed. CommandBuilder
+            // emits options in array order, which is what keeps this first.
+            'q' => true,
             's' => true, // silent mode
             // -s alone also silences curl's ERROR messages, which left every
             // transport failure reported as "exit code 6: 000" — the write-out
@@ -503,8 +538,18 @@ final class CurlProcess
             // this client explicitly refuses to speak. Mirrors the FFI engine's
             // CURLOPT_REDIR_PROTOCOLS.
             'proto-redir' => '=http,https',
+            // Turn on curl's in-memory cookie engine for this one process, so a
+            // cookie set on a redirect hop (login → 302 + Set-Cookie → GET) is
+            // sent on the follow-up the way every browser does. An empty
+            // string is curl's documented spelling for "engine on, no file";
+            // nothing is written to disk and nothing outlives the process.
+            'b' => '',
             'w' => '%{http_code}', // write out format
             'max-time' => $this->timeout,
+            // A cap on the body, because it is buffered whole (see
+            // CurlOptions::DEFAULT_MAX_FILESIZE). A caller's own max-filesize
+            // is merged in later and overrides this.
+            'max-filesize' => CurlOptions::DEFAULT_MAX_FILESIZE,
             'o' => $outputFile, // output file
             'D' => $headerFile, // dump headers file
         ];

@@ -388,7 +388,8 @@ class PHPImpersonate implements ClientInterface
         return new Response(
             $isHead ? '' : $result['body'],
             $result['status'],
-            ResponseHeaderParser::parse($result['headers'])
+            ResponseHeaderParser::parse($result['headers']),
+            ResponseHeaderParser::setCookieHeaders($result['headers'])
         );
     }
 
@@ -590,9 +591,7 @@ class PHPImpersonate implements ClientInterface
      */
     private static function carriesBuiltinConfig(BrowserInterface $browser): bool
     {
-        $name = $browser->getName();
-
-        return BrowserConfig::hasConfig($name) && $browser->getConfig() === BrowserConfig::getConfig($name);
+        return BrowserConfig::matchesBuiltin($browser->getName(), $browser->getConfig());
     }
 
     /**

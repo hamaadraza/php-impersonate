@@ -94,7 +94,10 @@ one that works in your environment — you never touch a second class.
 > [!TIP]
 > Just use `PHPImpersonate` — the default `'auto'` engine chooses **FFI** when
 > it's usable, otherwise the **executable**. Both accept the same options and
-> produce the same fingerprints, so your code is identical either way.
+> produce the same fingerprints, so your code is identical either way. They
+> draw the fingerprint from one place — the impersonation table built into
+> curl-impersonate itself (`curl_easy_impersonate()` on FFI, `--impersonate`
+> on the executable) — so the two cannot drift apart.
 
 ```php
 use Raza\PHPImpersonate\PHPImpersonate;
@@ -296,6 +299,32 @@ foreach ($response->headers() as $name => $values) {
 `headers()` contains only headers that were on the wire — the status line is not
 mixed in; read it with `$response->status()`.
 
+### Cookies
+
+Within one request, cookies behave as they do in a browser: a cookie set on a
+redirect hop (the classic `POST /login` → `302` + `Set-Cookie` → `GET /home`)
+is sent on the follow-up automatically, on both engines. Nothing persists
+*between* requests — there is no cookie jar yet — so to keep a session, read
+the cookies every response in the chain set and send them back yourself:
+
+```php
+$login = $client->sendPost('https://example.com/login', ['user' => 'me', 'pass' => '…']);
+
+// Every Set-Cookie received on ANY response in the redirect chain, in order —
+// headers() and headerAll() describe the final response only, and a session
+// cookie is usually set on the 302, not on the page it redirects to.
+$cookies = [];
+foreach ($login->setCookieHeaders() as $setCookie) {
+    [$pair] = explode(';', $setCookie, 2);
+    [$name, $value] = explode('=', $pair, 2);
+    $cookies[$name] = $value;
+}
+
+$page = $client->sendGet('https://example.com/account', [
+    'Cookie' => http_build_query($cookies, '', '; ', PHP_QUERY_RFC3986),
+]);
+```
+
 ### Overriding a profile header
 
 A header you pass **replaces** the browser profile's header of the same name
@@ -373,6 +402,7 @@ $response = $client->sendGet('https://api.ipify.org?format=json');
 | `cacert` | string | Path to a custom CA bundle file |
 | `capath` | string | Path to a custom CA directory |
 | `max-redirs` | int | Maximum redirects to follow (default 50) |
+| `max-filesize` | int | Largest response body accepted, in bytes (default 256 MiB); a larger one throws `RequestException` with code 63 |
 | `insecure` | bool | Skip TLS certificate verification (use with care) |
 
 > [!NOTE]
@@ -382,6 +412,11 @@ $response = $client->sendGet('https://api.ipify.org?format=json');
 > silently defeat the impersonation. Set a custom `User-Agent` as a request
 > header instead — it replaces the profile's, see
 > [Overriding a profile header](#overriding-a-profile-header).
+
+> [!NOTE]
+> Responses are buffered in full before they are returned, so `max-filesize`
+> is what stands between you and a server that streams forever. The default
+> is deliberately finite; raise it for known-large downloads.
 
 > [!TIP]
 > Without an explicit `cacert`/`capath`, the CA bundle is taken from
@@ -421,6 +456,15 @@ become `1`/`0` — so the two carry the same data and only the framing differs.
 Supply your own `boundary=` in the `Content-Type` to control it; otherwise one
 is generated for you. File uploads are not supported: pass a pre-encoded body
 via `Request` if you need them.
+
+## What is not taken from the environment
+
+The executable engine runs curl with `-q`, so a `~/.curlrc` (or
+`$CURL_HOME`/`$XDG_CONFIG_HOME`) on the machine is **ignored** — the FFI
+engine never read one, and a curlrc could otherwise add headers, a proxy or
+`--insecure` to every request. What both engines *do* honour, like every
+libcurl program, are the `http_proxy`/`HTTPS_PROXY`/`NO_PROXY` variables;
+pass `'proxy' => ''` to go direct regardless.
 
 ## Timeouts
 

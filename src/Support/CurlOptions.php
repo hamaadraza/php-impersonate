@@ -33,6 +33,22 @@ final class CurlOptions
     public const CURLOPT_MAXREDIRS = 68;
     public const CURLOPT_SSL_VERIFYPEER = 64;
     public const CURLOPT_SSL_VERIFYHOST = 81;
+    /** CURLOPTTYPE_OFF_T (30000) + 117. */
+    public const CURLOPT_MAXFILESIZE_LARGE = 30117;
+
+    /**
+     * Default cap on a response body, in bytes, applied by both engines when the
+     * caller sets no `max-filesize`.
+     *
+     * Both engines buffer the whole body before returning it, and the FFI
+     * engine's buffer is C memory that PHP's memory_limit cannot see. Measured
+     * against a server streaming 1 MB chunks indefinitely, the FFI engine
+     * reached 568 MB of RSS in three seconds while PHP reported a 4 MB peak;
+     * the executable engine filled the temp directory instead. A finite default
+     * turns that into a RequestException (curl error 63) instead of an OOM kill
+     * or a full disk. curl also enforces it on chunked, unknown-length bodies.
+     */
+    public const DEFAULT_MAX_FILESIZE = 268435456; // 256 MiB
 
     /**
      * name => [type, curlopt id]. The name doubles as the executable engine's
@@ -49,6 +65,7 @@ final class CurlOptions
         'cacert' => [self::TYPE_STRING, self::CURLOPT_CAINFO],
         'capath' => [self::TYPE_STRING, self::CURLOPT_CAPATH],
         'max-redirs' => [self::TYPE_LONG,   self::CURLOPT_MAXREDIRS],
+        'max-filesize' => [self::TYPE_LONG, self::CURLOPT_MAXFILESIZE_LARGE],
         'insecure' => [self::TYPE_BOOL,   null],
     ];
 

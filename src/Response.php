@@ -9,12 +9,33 @@ class Response
      * @param int $statusCode HTTP status code
      * @param array<string, string[]> $headers Response headers — each name maps to a list of values.
      *                                          Multiple values are preserved (e.g. several Set-Cookie lines).
+     * @param list<string> $setCookieHeaders Every Set-Cookie value received on ANY response in the
+     *                                       redirect chain, in wire order (see {@see setCookieHeaders()}).
      */
     public function __construct(
         private string $body,
         private int $statusCode,
-        private array $headers
+        private array $headers,
+        private array $setCookieHeaders = []
     ) {
+    }
+
+    /**
+     * Every Set-Cookie value received while making this request, including
+     * those on redirect responses, in the order they arrived.
+     *
+     * {@see headers()} and {@see headerAll()} describe the FINAL response only,
+     * and that is the wrong place to look for cookies: a session cookie is
+     * routinely set on the 302 after a login and never repeated on the page it
+     * redirects to. The engines follow such a cookie for the rest of the
+     * redirect chain; this is how the caller gets to keep it for the next
+     * request.
+     *
+     * @return list<string>
+     */
+    public function setCookieHeaders(): array
+    {
+        return $this->setCookieHeaders;
     }
 
     /**

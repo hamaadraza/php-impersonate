@@ -29,6 +29,7 @@ This release is **2.0.0**. Everything below is a deliberate change of contract; 
 5. Replace `PHPImpersonateFactory::get()` with `PHPImpersonate::get()`.
 ### Added
 
+- **`scripts/ffi-diagnose.php`** runs each stage of the FFI engine in its own process and reports how it ended, so a crash (a segmentation fault leaves no exception) names its stage and environment. CI runs it whenever the FFI assertion fails.
 - **`Response::effectiveUrl()`**: the URL the transfer ended on after redirects, on both engines (`%{url_effective}` / `CURLINFO_EFFECTIVE_URL`).
 - **`BrowserName::latest($family)`** and **`BrowserName::DEPRECATED`** / `isDeprecated()`. Profiles of releases older than 2024 are marked `@deprecated` — an EOL browser version is a detection signal in itself — and `latest('chrome')`, `latest('safari_ios')`, … name the newest current profile of a family.
 - **A README "Security considerations" section** stating that no SSRF filtering is performed and how to enforce a URL policy (`max-redirs => 0` plus `effectiveUrl()`), plus the environment variables and `ffi.enable` caveats.

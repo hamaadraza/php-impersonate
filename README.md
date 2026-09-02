@@ -156,6 +156,15 @@ new PHPImpersonate('chrome146', engine: PHPImpersonate::ENGINE_PROCESS);  // alw
 
 PHPImpersonate::ffiAvailable();                 // is the FFI engine usable here?
 PHPImpersonate::ffiUnavailableReason();         // …and if not, why (null when it is)
+```
+
+If the FFI engine misbehaves in a way no exception can describe (a crash), run
+`php vendor/hamaadraza/php-impersonate/scripts/ffi-diagnose.php`: it executes
+each stage of the engine in a separate process and reports which one failed,
+along with the PHP build and extensions it ran under — paste that into a bug
+report.
+
+```php
 (new PHPImpersonate('chrome146'))->engine();    // 'ffi' or 'process' — what was chosen
 ```
 

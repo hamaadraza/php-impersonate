@@ -161,6 +161,13 @@ jobs:
         run: |
           php -r 'require "vendor/autoload.php"; $ok = Raza\PHPImpersonate\PHPImpersonate::ffiAvailable(); echo "FFI engine available: ", var_export($ok, true), PHP_EOL; if (! $ok) { echo Raza\PHPImpersonate\PHPImpersonate::ffiUnavailableReason(), PHP_EOL; } exit($ok ? 0 : 1);'
 
+      # When the assertion above fails — or, as on PHP 8.5 with setup-php's
+      # build, segfaults — run every FFI stage in its own process so the log
+      # names the stage that crashed and the build it crashed under.
+      - name: Diagnose the FFI engine
+        if: failure() && runner.os != 'Windows'
+        run: php scripts/ffi-diagnose.php
+
       # Run httpbin locally on EVERY leg so the HTTP behaviour tests never
       # depend on the public service (which answers 5xx under load — a 502 on
       # /cookies/set failed the macOS leg). go-httpbin listens on 8080 inside
@@ -182,6 +189,14 @@ jobs:
       # No Docker on the macOS and Windows runners, and go-httpbin publishes no
       # prebuilt binaries — but every runner image ships Go, and the server is
       # a single `go install` away.
+      # The Windows image has Go on PATH; the macOS ARM64 image does not.
+      - name: Set up Go (macOS/Windows)
+        if: runner.os != 'Linux'
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version: stable
+          cache: false
+
       - name: Build local httpbin (macOS/Windows)
         if: runner.os != 'Linux'
         shell: bash

@@ -67,9 +67,8 @@ class BrowserLikeHeadersTest extends TestCase
     {
         TestServer::requireHttpbin($this);
 
-        $headers = (new PHPImpersonate('chrome146', 30, [], $engine))
-            ->sendPost(TestServer::httpbin('/post'))
-            ->json()['headers'] ?? [];
+        $headers = TestServer::json((new PHPImpersonate('chrome146', 30, [], $engine))
+            ->sendPost(TestServer::httpbin('/post')))['headers'] ?? [];
 
         $lower = array_change_key_case($headers, CASE_LOWER);
         $this->assertArrayNotHasKey('content-type', $lower, "$engine sent curl's default Content-Type on an empty POST");
@@ -83,9 +82,8 @@ class BrowserLikeHeadersTest extends TestCase
 
         // Over a megabyte is where curl adds Expect: 100-continue on HTTP/1.1.
         $body = str_repeat('x', 1500000);
-        $headers = (new PHPImpersonate('chrome146', 60, [], $engine))
-            ->send(new Request('POST', TestServer::httpbin('/post'), ['Content-Type' => 'text/plain'], $body))
-            ->json()['headers'] ?? [];
+        $headers = TestServer::json((new PHPImpersonate('chrome146', 60, [], $engine))
+            ->send(new Request('POST', TestServer::httpbin('/post'), ['Content-Type' => 'text/plain'], $body)))['headers'] ?? [];
 
         $lower = array_change_key_case($headers, CASE_LOWER);
         $this->assertArrayNotHasKey('expect', $lower, "$engine sent Expect: 100-continue, which no browser does");

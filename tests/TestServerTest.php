@@ -79,6 +79,17 @@ class TestServerTest extends TestCase
         $this->assertSame("raw", $flat["data"]);
     }
 
+    public function testCookiesAcceptsBothEnvelopes(): void
+    {
+        $python = new \Raza\PHPImpersonate\Response('{"cookies":{"session":"abc123"}}', 200, []);
+        $go = new \Raza\PHPImpersonate\Response('{"session":"abc123"}', 200, []);
+        $none = new \Raza\PHPImpersonate\Response('{}', 200, []);
+
+        $this->assertSame(['session' => 'abc123'], TestServer::cookies($python));
+        $this->assertSame(['session' => 'abc123'], TestServer::cookies($go));
+        $this->assertSame([], TestServer::cookies($none));
+    }
+
     public function testJsonLeavesThePythonShapeUntouched(): void
     {
         $python = new \Raza\PHPImpersonate\Response(json_encode([

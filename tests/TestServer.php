@@ -62,6 +62,22 @@ final class TestServer
         return $json;
     }
 
+    /**
+     * The cookies an httpbin /cookies response reports, as name => value.
+     *
+     * The Python httpbin wraps them — `{"cookies": {...}}` — while go-httpbin
+     * returns the bare map at the top level. Same data, different envelope.
+     *
+     * @return array<string,string>
+     */
+    public static function cookies(\Raza\PHPImpersonate\Response $response): array
+    {
+        $json = $response->json();
+
+        /** @var array<string,string> */
+        return is_array($json['cookies'] ?? null) ? $json['cookies'] : (is_array($json) ? $json : []);
+    }
+
     public static function httpbin(string $path = ''): string
     {
         $base = getenv('HTTPBIN_URL') ?: 'https://httpbin.org';

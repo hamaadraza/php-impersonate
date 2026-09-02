@@ -462,9 +462,8 @@ class EngineParityTest extends TestCase
      */
     private function sentHeaders(string $browser, string $engine): array
     {
-        $body = (new PHPImpersonate($browser, 30, [], $engine))
-            ->sendGet(TestServer::httpbin('/headers'))
-            ->json();
+        $body = TestServer::json((new PHPImpersonate($browser, 30, [], $engine))
+            ->sendGet(TestServer::httpbin('/headers')));
 
         $out = [];
         foreach ($body['headers'] ?? [] as $name => $value) {

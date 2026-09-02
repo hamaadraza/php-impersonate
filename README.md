@@ -48,7 +48,7 @@ that browser.
 
 ## Requirements
 
-- PHP **8.0+**
+- PHP **8.2+** (8.0 and 8.1 are past end-of-life and cannot run the test suite)
 - Optional, for the faster [FFI engine](#two-engines-one-class): the `ffi`
   extension (bundled with PHP; always usable on the CLI).
 

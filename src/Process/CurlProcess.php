@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 namespace Raza\PHPImpersonate\Process;
 
 use Raza\PHPImpersonate\Support\CaBundle;
@@ -18,6 +20,8 @@ use Raza\PHPImpersonate\Support\ResponseHeaderParser;
  * files. This is the low-level engine behind PHPImpersonate's process path and
  * the counterpart to {@see \Raza\PHPImpersonate\Ffi\CurlImpersonate}; it deals
  * only in already validated/normalised inputs.
+ *
+ * @internal Not part of the public API; use {@see \Raza\PHPImpersonate\PHPImpersonate}.
  */
 final class CurlProcess
 {
@@ -150,10 +154,33 @@ final class CurlProcess
      */
     private function createTempFile(string $prefix): string
     {
-        $tempFile = tempnam(sys_get_temp_dir(), $prefix);
+        $dir = sys_get_temp_dir();
+
+        // Checked up front, because tempnam() does not fail on an unusable
+        // directory: it falls back to the system default and raises an
+        // E_NOTICE, which the error handlers Laravel and Symfony install turn
+        // into an ErrorException — one that escapes every exception this
+        // library documents. Say what is wrong instead.
+        if (! is_dir($dir) || ! is_writable($dir)) {
+            throw new RequestException(sprintf(
+                'The temporary directory "%s" does not exist or is not writable; the executable engine '
+                . 'needs one for request bodies and responses. Check TMPDIR / sys_temp_dir, or use the FFI engine.',
+                $dir
+            ));
+        }
+
+        // And keep any notice tempnam() still raises from becoming somebody
+        // else's exception: swallow it here and report the failure ourselves.
+        set_error_handler(static fn (): bool => true);
+
+        try {
+            $tempFile = tempnam($dir, $prefix);
+        } finally {
+            restore_error_handler();
+        }
 
         if ($tempFile === false) {
-            throw new RequestException('Unable to create temporary file');
+            throw new RequestException("Unable to create a temporary file in \"$dir\"");
         }
 
         if (! is_writable($tempFile)) {
@@ -284,6 +311,9 @@ final class CurlProcess
             // behind on disk.
             $headerLines = $this->collectHeaderLines($headers, $browserConfig['headers'] ?? []);
         }
+
+        // Headers curl would add on its own that no browser sends (see RequestPreparer).
+        $headerLines = array_merge($headerLines, RequestPreparer::implicitHeaderSuppressions($method, $body, $headers));
         [$credentials, $plainOptions] = $this->splitCredentialOptions($this->curlOptions);
 
         // Custom curl options (already validated and normalised).
@@ -683,7 +713,7 @@ final class CurlProcess
      *
      * @param list<string> $command argv array (executable first); proc_open array
      *                              mode runs it directly without any shell.
-     * @return array{status_code: string, url: string, stdout: array<int,string>, output: array<int,string>}
+     * @return array{status_code: string, url: string}
      */
     private function runCommand(array $command): array
     {
@@ -725,7 +755,7 @@ final class CurlProcess
     /**
      * @param resource $process
      * @param array<int,resource> $pipes
-     * @return array{status_code: string, url: string, stdout: array<int,string>, output: array<int,string>}
+     * @return array{status_code: string, url: string}
      */
     private function handleProcess($process, array $pipes, int $timeout, string $command): array
     {
@@ -745,12 +775,21 @@ final class CurlProcess
         // So the status read AT THE TRANSITION is the authoritative exit code,
         // and proc_close()'s return is only a fallback. -1 means "not reported".
         $reapedExitCode = -1;
+        $terminatedBySignal = null;
 
         while (true) {
             $status = proc_get_status($process);
 
             if (! $status['running']) {
                 $reapedExitCode = $status['exitcode'];
+                // A child killed by a signal (an OOM kill, a SIGSEGV in curl, an
+                // operator's kill) reports exitcode -1 — the same "indeterminate"
+                // value an old PHP gave for a clean run — and it used to be judged
+                // on the status line alone, so a curl killed after printing its
+                // write-out passed as success. The signal is the fact that matters.
+                if (! empty($status['signaled'])) {
+                    $terminatedBySignal = (int) $status['termsig'];
+                }
 
                 break;
             }
@@ -803,6 +842,19 @@ final class CurlProcess
         }
 
         $closedExitCode = proc_close($process);
+
+        if ($terminatedBySignal !== null) {
+            $diagnostics = trim($errors) === '' ? [] : explode("\n", trim($errors));
+
+            throw new RequestException(
+                "curl-impersonate was terminated by signal $terminatedBySignal before the transfer completed"
+                . ($diagnostics !== [] ? ': ' . implode(' ', $diagnostics) : ''),
+                0,
+                null,
+                $command,
+                $diagnostics
+            );
+        }
 
         // Prefer whichever actually reported a code; see $reapedExitCode above.
         $exitCode = $reapedExitCode >= 0 ? $reapedExitCode : $closedExitCode;
@@ -865,7 +917,7 @@ final class CurlProcess
     }
 
     /**
-     * @return array{status_code: string, url: string, stdout: array<int,string>, output: array<int,string>}
+     * @return array{status_code: string, url: string}
      */
     private function processCommandOutput(
         string $output,
@@ -873,9 +925,8 @@ final class CurlProcess
         int $exitCode,
         string $command
     ): array {
-        // Keep every stdout line verbatim. array_filter() would drop a line that
-        // is exactly "0" or blank, and on the Windows recovery path these lines
-        // ARE the response body — the same body-of-"0" case guarded in request().
+        // Keep every stdout line verbatim: array_filter() would drop a line that
+        // is exactly "0" or blank, and the write-out lines are read by position.
         $trimmedOutput = trim($output);
         $trimmedErrors = trim($errors);
         $outputLines = $trimmedOutput === '' ? [] : explode("\n", $trimmedOutput);
@@ -932,13 +983,6 @@ final class CurlProcess
             );
         }
 
-        return [
-            'status_code' => $statusCode,
-            'url' => $effectiveUrl,
-            // stdout only: safe to mine for response content
-            'stdout' => $outputLines,
-            // stdout + stderr: for diagnostics, never for response bodies
-            'output' => array_merge($outputLines, $errorLines),
-        ];
+        return ['status_code' => $statusCode, 'url' => $effectiveUrl];
     }
 }

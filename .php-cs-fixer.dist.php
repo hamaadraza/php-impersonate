@@ -25,7 +25,7 @@ return (new PhpCsFixer\Config())
         'lowercase_static_reference' => true, // PSR-1: The static keyword MUST be declared in lower case
         
         // Additional PSR-12 enforcement
-        'declare_strict_types' => false, // Optional: uncomment to enforce strict types
+        'declare_strict_types' => true, // every file: no silent scalar coercion at API boundaries
         'function_declaration' => true,
         'visibility_required' => true, // PSR-12: Visibility MUST be declared on all properties and methods
         

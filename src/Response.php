@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 namespace Raza\PHPImpersonate;
 
 class Response
@@ -210,14 +212,50 @@ class Response
             }
         }
 
-        $output .= "\nBody (first 500 chars):\n";
-        $output .= substr($this->body, 0, 500);
+        $output .= "\nBody (first 500 bytes):\n";
+        $output .= self::cutUtf8($this->body, 500);
 
         if (strlen($this->body) > 500) {
             $output .= "...[truncated]";
         }
 
         return $output;
+    }
+
+    /**
+     * The first $bytes of $string, never ending inside a multi-byte UTF-8
+     * sequence: a preview that stopped mid-character produced a lone lead
+     * byte that made the whole dump invalid UTF-8 — enough for a JSON logger
+     * to refuse it. Needs no mbstring: a continuation byte is 10xxxxxx and a
+     * lead byte's high bits say how long its sequence is.
+     */
+    private static function cutUtf8(string $string, int $bytes): string
+    {
+        if (strlen($string) <= $bytes) {
+            return $string;
+        }
+
+        $cut = substr($string, 0, $bytes);
+        $length = strlen($cut);
+
+        // Walk back at most 3 bytes to the start of the last character.
+        for ($i = $length - 1; $i >= 0 && $i >= $length - 4; $i--) {
+            $byte = ord($cut[$i]);
+
+            if (($byte & 0xC0) === 0x80) {
+                continue; // continuation byte: its lead byte is further back
+            }
+
+            $need = $byte >= 0xF0 ? 4 : ($byte >= 0xE0 ? 3 : ($byte >= 0xC0 ? 2 : 1));
+
+            if ($length - $i < $need) {
+                $cut = substr($cut, 0, $i); // sequence was cut short: drop it
+            }
+
+            break;
+        }
+
+        return $cut;
     }
 
     /**

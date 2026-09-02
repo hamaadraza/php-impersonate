@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 namespace Raza\PHPImpersonate\Platform;
 
 use Raza\PHPImpersonate\Exception\InvalidArgumentException;
@@ -10,8 +12,10 @@ use Raza\PHPImpersonate\Exception\InvalidArgumentException;
  * Array mode executes the program directly — no cmd.exe on Windows, no sh on
  * Unix — so values need no shell escaping and cannot be used for injection.
  * The library therefore never builds a shell command string.
+ *
+ * @internal Not part of the public API; used by {@see \Raza\PHPImpersonate\Process\CurlProcess}.
  */
-class CommandBuilder
+final class CommandBuilder
 {
     public const TYPE_GENERIC = 'generic';
     public const TYPE_CURL = 'curl';

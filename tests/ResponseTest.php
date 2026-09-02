@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 namespace Raza\PHPImpersonate\Tests;
 
 use PHPUnit\Framework\TestCase;
@@ -308,6 +310,31 @@ class ResponseTest extends TestCase
         $response = $this->makeResponse([], 200, 'short');
 
         $this->assertStringNotContainsString('[truncated]', $response->dump());
+    }
+
+    /**
+     * The preview cut at a byte count, so a multi-byte character straddling
+     * byte 500 left a lone lead byte behind — enough to make the whole dump
+     * invalid UTF-8 and have a JSON logger refuse it.
+     */
+    public function testDumpNeverCutsAMultibyteCharacterInHalf(): void
+    {
+        // 499 ASCII bytes, then a 3-byte character straddling the 500-byte cut.
+        $body = str_repeat('a', 499) . "\u{20AC}" . str_repeat('b', 50);
+        $preview = $this->makeResponse([], 200, $body)->dump();
+
+        $this->assertTrue(mb_check_encoding($preview, 'UTF-8'), 'dump() must stay valid UTF-8');
+        $this->assertStringContainsString(str_repeat('a', 499) . "...[truncated]", $preview);
+        $this->assertStringNotContainsString("\u{20AC}", $preview);
+    }
+
+    public function testDumpKeepsACharacterThatFitsExactly(): void
+    {
+        // 497 ASCII bytes + a 3-byte character = exactly 500: nothing to drop.
+        $body = str_repeat('a', 497) . "\u{20AC}" . 'tail';
+        $preview = $this->makeResponse([], 200, $body)->dump();
+
+        $this->assertStringContainsString("\u{20AC}...[truncated]", $preview);
     }
 
     // -------------------------------------------------------------------------

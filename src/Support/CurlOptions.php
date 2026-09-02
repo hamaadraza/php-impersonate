@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 namespace Raza\PHPImpersonate\Support;
 
 use Raza\PHPImpersonate\Exception\InvalidArgumentException;

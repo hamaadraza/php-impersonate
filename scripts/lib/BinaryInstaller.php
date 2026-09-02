@@ -497,15 +497,35 @@ final class BinaryInstaller
 
     private function verify(string $path): bool
     {
-        $out = @shell_exec(escapeshellarg($path) . ' --version 2>' . Http::nullDevice());
+        $out = $this->runVersion($path);
 
-        return is_string($out) && str_contains($out, 'IMPERSONATE');
+        return $out !== null && str_contains($out, 'IMPERSONATE');
+    }
+
+    /**
+     * `<path> --version` through proc_open in array mode: no shell, so an
+     * install path containing `%`, `!`, spaces or quotes needs no escaping
+     * (escapeshellarg() replaces `%` and `!` with spaces on Windows).
+     */
+    private function runVersion(string $path): ?string
+    {
+        $process = @proc_open([$path, '--version'], [0 => ['pipe', 'r'], 1 => ['pipe', 'w'], 2 => ['pipe', 'w']], $pipes);
+        if (! is_resource($process)) {
+            return null;
+        }
+        fclose($pipes[0]);
+        $out = (string) stream_get_contents($pipes[1]);
+        fclose($pipes[1]);
+        fclose($pipes[2]);
+        proc_close($process);
+
+        return $out;
     }
 
     private function versionString(string $path): string
     {
-        $out = @shell_exec(escapeshellarg($path) . ' --version 2>' . Http::nullDevice());
-        if (! is_string($out)) {
+        $out = $this->runVersion($path);
+        if ($out === null) {
             return 'unknown';
         }
 

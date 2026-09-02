@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 namespace Raza\PHPImpersonate\Support;
 
 use Raza\PHPImpersonate\Request;
@@ -12,6 +14,8 @@ use Raza\PHPImpersonate\Exception\InvalidArgumentException;
  * Both the process-based client (PHPImpersonate) and the FFI-based client
  * (the FFI engine) share this so their security-sensitive handling (CRLF rejection,
  * scheme allow-listing, case-insensitive Content-Type) can never diverge.
+ *
+ * @internal Not part of the public API.
  */
 final class RequestPreparer
 {
@@ -303,11 +307,57 @@ final class RequestPreparer
      */
     public static function assertHeaderIsSafe(string $name, string $value): void
     {
-        if ($name === '' || preg_match('/[\r\n\0]/', $name . $value) || str_contains($name, ':')) {
+        // A field name is an RFC 9110 §5.1 token: letters, digits and
+        // !#$%&'*+-.^_`|~ — nothing else. Rejecting only CR/LF/NUL and ":" let
+        // a name with a space through, and the request went out only for the
+        // server to answer 400 (HTTP/2 forbids such a name outright).
+        if ($name === '' || ! preg_match('/^[!#$%&\'*+.^_`|~0-9A-Za-z-]+$/', $name)) {
+            throw new InvalidArgumentException(sprintf(
+                'Invalid header "%s": a name must be a non-empty RFC 9110 token '
+                . '(letters, digits, and any of !#$%%&\'*+-.^_`|~; no spaces, no ":").',
+                $name
+            ));
+        }
+
+        if (preg_match('/[\r\n\0]/', $value)) {
             throw new InvalidArgumentException(
-                sprintf('Invalid header "%s": names must be non-empty without ":" and neither part may contain CR, LF, or NUL', $name)
+                sprintf('Invalid header "%s": the value may not contain CR, LF, or NUL', $name)
             );
         }
+    }
+
+    /**
+     * Header lines that tell libcurl NOT to add a header it otherwise would —
+     * its `Name:` form, with nothing after the colon — for the headers curl
+     * generates that no browser sends.
+     *
+     *  - `Expect: 100-continue`, which curl adds to any HTTP/1.1 request with a
+     *    body over a megabyte. Browsers never send it, and it also costs a
+     *    round trip (or a one-second wait) before the body goes out.
+     *  - `Content-Type: application/x-www-form-urlencoded`, which curl adds to
+     *    a POST whose body was given as data — including the EMPTY data a
+     *    bodyless POST is sent as. A browser's bodyless POST carries no
+     *    Content-Type at all (just `Content-Length: 0`).
+     *
+     * A caller who sets either header themselves keeps theirs: the caller's
+     * headers are checked case-insensitively before a suppression is added.
+     *
+     * @param array<string,string> $callerHeaders
+     * @return list<string>
+     */
+    public static function implicitHeaderSuppressions(string $method, ?string $body, array $callerHeaders): array
+    {
+        $lines = [];
+
+        if (self::findHeaderValue($callerHeaders, 'Expect') === null) {
+            $lines[] = 'Expect:';
+        }
+
+        if (strtoupper($method) === 'POST' && $body === null && self::findHeaderValue($callerHeaders, 'Content-Type') === null) {
+            $lines[] = 'Content-Type:';
+        }
+
+        return $lines;
     }
 
     /**

@@ -1,9 +1,20 @@
 <?php
 
+declare(strict_types=1);
+
 namespace Raza\PHPImpersonate\Config;
 
 use Raza\PHPImpersonate\Platform\PlatformDetector;
 
+/**
+ * Process-wide, publicly mutable platform settings.
+ *
+ * @deprecated Its one remaining consumer is the `which_command` fallback in
+ *             {@see \Raza\PHPImpersonate\Browser\Browser}, which is only reached
+ *             when a native PATH scan finds nothing. Global mutable state of
+ *             this kind will be removed in the next major version; nothing in
+ *             an application needs to call it.
+ */
 class Configuration
 {
     /**

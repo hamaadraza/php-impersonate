@@ -1,67 +1,83 @@
 {
-  "name": "hamaadraza/php-impersonate",
-  "description": "A PHP library for making HTTP requests with browser impersonation",
-  "keywords": [
-    "hamaadraza",
-    "php-impersonate"
-  ],
-  "homepage": "https://github.com/hamaadraza/php-impersonate",
-  "license": "MIT",
-  "authors": [
-    {
-      "name": "Hamaad Raza",
-      "email": "hamaadraza9@gmail.com",
-      "role": "Developer"
-    }
-  ],
-  "require": {
-    "php": "^8"
-  },
-  "require-dev": {
-    "friendsofphp/php-cs-fixer": "^3.21.1",
-    "pestphp/pest": "^3.0",
-    "phpstan/extension-installer": "^1.4",
-    "phpstan/phpstan": "^2.2"
-  },
-  "suggest": {
-    "ext-ffi": "Enables the in-process FFI engine, which reuses connections instead of spawning curl per request. Without it every request forks a process."
-  },
-  "bin": [
-    "bin/php-impersonate-install"
-  ],
-  "autoload": {
-    "psr-4": {
-      "Raza\\PHPImpersonate\\": "src"
-    }
-  },
-  "autoload-dev": {
-    "psr-4": {
-      "Raza\\PHPImpersonate\\Tests\\": "tests"
-    }
-  },
-  "scripts": {
-    "test": "vendor/bin/pest",
-    "test-coverage": "vendor/bin/pest --coverage",
-    "analyse": "vendor/bin/phpstan analyse",
-    "test-server-up": "docker compose up -d httpbin",
-    "test-server-down": "docker compose down",
-    "format": "vendor/bin/php-cs-fixer fix --config=.php-cs-fixer.dist.php --allow-risky=yes",
-    "format:check": "vendor/bin/php-cs-fixer fix --config=.php-cs-fixer.dist.php --allow-risky=yes --dry-run --diff",
-    "cs-check": "@format:check",
-    "update-impersonate": "@php scripts/update-impersonate.php",
-    "update-browsers": "@php scripts/update-browsers.php",
-    "update-binaries": "@php scripts/update-binaries.php",
-    "update-fingerprint-baseline": "@php scripts/update-fingerprint-baseline.php",
-    "update-libraries": "@php scripts/update-binaries.php --libs-only",
-    "install-binaries": "@php bin/php-impersonate-install"
-  },
-  "config": {
-    "sort-packages": true,
-    "allow-plugins": {
-      "pestphp/pest-plugin": true,
-      "phpstan/extension-installer": true
-    }
-  },
-  "minimum-stability": "dev",
-  "prefer-stable": true
+    "name": "hamaadraza/php-impersonate",
+    "description": "A PHP library for making HTTP requests with browser impersonation",
+    "keywords": [
+        "curl-impersonate",
+        "browser-impersonation",
+        "tls-fingerprint",
+        "ja3",
+        "ja4",
+        "http-client",
+        "scraping",
+        "anti-bot",
+        "ffi"
+    ],
+    "homepage": "https://github.com/hamaadraza/php-impersonate",
+    "license": "MIT",
+    "authors": [
+        {
+            "name": "Hamaad Raza",
+            "email": "hamaadraza9@gmail.com",
+            "role": "Developer"
+        }
+    ],
+    "support": {
+        "issues": "https://github.com/hamaadraza/php-impersonate/issues",
+        "source": "https://github.com/hamaadraza/php-impersonate"
+    },
+    "funding": [
+        {
+            "type": "github",
+            "url": "https://github.com/sponsors/hamaadraza"
+        }
+    ],
+    "require": {
+        "php": "^8.2"
+    },
+    "require-dev": {
+        "friendsofphp/php-cs-fixer": "^3.21.1",
+        "pestphp/pest": "^3.0",
+        "phpstan/extension-installer": "^1.4",
+        "phpstan/phpstan": "^2.2"
+    },
+    "suggest": {
+        "ext-ffi": "Enables the in-process FFI engine, which reuses connections instead of spawning curl per request. Without it every request forks a process."
+    },
+    "bin": [
+        "bin/php-impersonate-install"
+    ],
+    "autoload": {
+        "psr-4": {
+            "Raza\\PHPImpersonate\\": "src"
+        }
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "Raza\\PHPImpersonate\\Tests\\": "tests"
+        }
+    },
+    "scripts": {
+        "test": "vendor/bin/pest",
+        "test-coverage": "vendor/bin/pest --coverage",
+        "analyse": "vendor/bin/phpstan analyse",
+        "test-server-up": "docker compose up -d httpbin",
+        "test-server-down": "docker compose down",
+        "format": "vendor/bin/php-cs-fixer fix --config=.php-cs-fixer.dist.php --allow-risky=yes",
+        "format:check": "vendor/bin/php-cs-fixer fix --config=.php-cs-fixer.dist.php --allow-risky=yes --dry-run --diff",
+        "cs-check": "@format:check",
+        "update-impersonate": "@php scripts/update-impersonate.php",
+        "update-browsers": "@php scripts/update-browsers.php",
+        "update-binaries": "@php scripts/update-binaries.php",
+        "update-fingerprint-baseline": "@php scripts/update-fingerprint-baseline.php",
+        "update-libraries": "@php scripts/update-binaries.php --libs-only",
+        "install-binaries": "@php bin/php-impersonate-install"
+    },
+    "config": {
+        "sort-packages": true,
+        "allow-plugins": {
+            "pestphp/pest-plugin": true,
+            "phpstan/extension-installer": true
+        }
+    },
+    "prefer-stable": true
 }

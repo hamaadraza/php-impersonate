@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 namespace Raza\PHPImpersonate\Ffi;
 
 use Raza\PHPImpersonate\Platform\PlatformDetector;
@@ -15,6 +17,8 @@ use Raza\PHPImpersonate\Platform\PlatformDetector;
  *
  * Returns null when neither yields a readable library (e.g. an on-demand
  * platform where the installer has not been run).
+ *
+ * @internal Not part of the public API.
  */
 final class LibResolver
 {

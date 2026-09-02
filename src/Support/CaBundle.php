@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 namespace Raza\PHPImpersonate\Support;
 
 use Raza\PHPImpersonate\Exception\RequestException;
@@ -9,6 +11,8 @@ use Raza\PHPImpersonate\Exception\RequestException;
  * not auto-discover the system trust store on Linux, so an explicit path is
  * needed there; macOS ships one at a well-known path; Windows uses the native
  * store (no file path).
+ *
+ * @internal Not part of the public API.
  */
 final class CaBundle
 {

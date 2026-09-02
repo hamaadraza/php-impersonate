@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 namespace Raza\PHPImpersonate\Ffi;
 
 use FFI;
@@ -17,6 +19,8 @@ use Raza\PHPImpersonate\Exception\RequestException;
  *
  * This is the low-level FFI engine behind PHPImpersonate; it deals only in already
  * validated/normalised inputs.
+ *
+ * @internal Not part of the public API; use {@see \Raza\PHPImpersonate\PHPImpersonate}.
  */
 final class CurlImpersonate
 {
@@ -293,7 +297,7 @@ final class CurlImpersonate
             $this->applyMethod($h, $method, $body);
             $this->applyCurlOptions($h, $curlOptions);
 
-            $slist = $this->buildHeaderList($headers);
+            $slist = $this->buildHeaderList($headers, RequestPreparer::implicitHeaderSuppressions($method, $body, $headers));
             if ($slist !== null) {
                 $ffi->curl_easy_setopt($h, self::CURLOPT_HTTPHEADER, $slist);
             }
@@ -477,13 +481,17 @@ final class CurlImpersonate
      * Build a curl_slist of "Name: Value" headers, or null when empty.
      *
      * @param array<string,string> $headers
+     * @param list<string> $rawLines Lines appended verbatim (libcurl's `Name:` removal form).
      * @return \FFI\CData|null
      */
-    private function buildHeaderList(array $headers)
+    private function buildHeaderList(array $headers, array $rawLines = [])
     {
         $list = null;
         foreach ($headers as $name => $value) {
             $list = $this->ffi->curl_slist_append($list, RequestPreparer::headerLine((string) $name, $value));
+        }
+        foreach ($rawLines as $line) {
+            $list = $this->ffi->curl_slist_append($list, $line);
         }
 
         return $list;

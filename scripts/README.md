@@ -91,6 +91,36 @@ composer format   # style the generated PHP
 composer test     # the suite makes live requests through the new binary/configs
 ```
 
+## Repository size
+
+Every binary refresh adds ~15 MB of new blobs to git history for the three
+committed platforms, and the history already carries unstripped ARM64 and
+musl artifacts from before they were made on-demand (`.git` is ~146 MB
+against a 10 MB dist). Two things keep it from getting worse:
+
+- Only `linux-x86_64`, `macos-aarch64` and `windows-x86_64` are committed;
+  everything else is git-ignored and fetched by the installer. Do not commit
+  the other directories, even temporarily.
+- Refresh binaries as rarely as upstream releases warrant, not per patch.
+
+Git LFS is **not** an option for a Composer package: GitHub's source archives
+(which Packagist distributes) contain LFS *pointer files*, not the binaries.
+
+Purging the historical blobs is possible but rewrites history — every clone
+must be re-cloned and open branches rebased — so it is a deliberate,
+announced step, not something a script should do. When you choose to:
+
+```bash
+pip install git-filter-repo
+git filter-repo --path bin/linux-aarch64 --path bin/linux-aarch64-musl \
+                --path bin/linux-x86_64-musl --path bin/macos-x86_64 \
+                --path bin/curl-impersonate-ff --path bin/windows-x86_64/libcurl-impersonate.dll \
+                --invert-paths
+git push --force --all && git push --force --tags
+```
+
+Tags keep their names, so Packagist releases are unaffected.
+
 ## Notes & caveats
 
 - **Windows** ships a self-contained `curl.exe`; the older auxiliary DLLs left

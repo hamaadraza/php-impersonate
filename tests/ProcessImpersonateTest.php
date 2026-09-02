@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 namespace Raza\PHPImpersonate\Tests;
 
 use ReflectionClass;
@@ -74,6 +76,30 @@ class ProcessImpersonateTest extends TestCase
     }
 
     /**
+     * The header lines in the `-H @file`, minus libcurl's `Name:` removal
+     * lines (the browser-like suppressions, covered by BrowserLikeHeadersTest).
+     *
+     * @param array{argv: list<string>, files: array<string,string>} $built
+     * @return list<string>
+     */
+    private function sentHeaders(array $built): array
+    {
+        $file = $this->valueAfter($built['argv'], '-H');
+        if ($file === null) {
+            return [];
+        }
+
+        $lines = [];
+        foreach (explode("\n", $built['files'][substr($file, 1)] ?? '') as $line) {
+            if ($line !== '' && ! preg_match('/^[^:\s]+:$/', $line)) {
+                $lines[] = $line;
+            }
+        }
+
+        return $lines;
+    }
+
+    /**
      * @param list<string> $argv
      */
     private function valueAfter(array $argv, string $flag): ?string
@@ -102,8 +128,9 @@ class ProcessImpersonateTest extends TestCase
 
         // Nor may the profile's headers travel in the header file: libcurl adds
         // them from the table and merges the caller's into their slots.
-        $headerFile = $this->valueAfter($argv, '-H');
-        $this->assertNull($headerFile, 'a built-in profile with no caller headers needs no header file');
+        // The header file then carries nothing but the browser-like
+        // suppressions (`Expect:`): no profile header, which libcurl adds itself.
+        $this->assertSame([], $this->sentHeaders($built));
     }
 
     public function testCallerHeadersAloneGoToTheHeaderFileForABuiltinProfile(): void
@@ -113,10 +140,7 @@ class ProcessImpersonateTest extends TestCase
             ['Accept-Language' => 'de-DE', 'X-Custom' => '1']
         );
 
-        $headerFile = substr((string) $this->valueAfter($built['argv'], '-H'), 1);
-        $lines = array_values(array_filter(explode("\n", $built['files'][$headerFile] ?? '')));
-
-        $this->assertSame(['Accept-Language: de-DE', 'X-Custom: 1'], $lines);
+        $this->assertSame(['Accept-Language: de-DE', 'X-Custom: 1'], $this->sentHeaders($built));
     }
 
     /**
@@ -151,11 +175,7 @@ class ProcessImpersonateTest extends TestCase
         $this->assertNotContains('--impersonate', $argv, 'a custom profile has no table entry to impersonate');
         $this->assertSame('CUSTOM-CIPHERS', $this->valueAfter($argv, '--ciphers'));
 
-        $headerFile = substr((string) $this->valueAfter($argv, '-H'), 1);
-        $this->assertSame(
-            ['X-Profile: p', 'X-Caller: c'],
-            array_values(array_filter(explode("\n", $built['files'][$headerFile] ?? '')))
-        );
+        $this->assertSame(['X-Profile: p', 'X-Caller: c'], $this->sentHeaders($built));
     }
 
     // -------------------------------------------------------------------------

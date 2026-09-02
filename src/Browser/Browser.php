@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 namespace Raza\PHPImpersonate\Browser;
 
 use RuntimeException;
@@ -21,13 +23,6 @@ class Browser implements BrowserInterface
 
     /** @var array<string,mixed> */
     private array $config;
-
-    /**
-     * Whether a candidate could not be verified because this host permits
-     * neither proc_open() nor shell_exec(). Remembered so the final error names
-     * the real cause instead of reporting the binary as absent.
-     */
-    private bool $verificationUnavailable = false;
 
     /**
      * @param string $name Browser name (e.g., 'chrome99_android')
@@ -137,16 +132,6 @@ class Browser implements BrowserInterface
 
         $checked = array_merge($this->getBundledPaths($binaryFile), $paths);
 
-        if ($this->verificationUnavailable) {
-            throw new RuntimeException(sprintf(
-                'A curl-impersonate candidate was found for %s but could not be verified: this host disables both '
-                . 'proc_open() and shell_exec(), and only a binary inside this package\'s bin/ directory is trusted '
-                . 'without running it. Install it there with `php vendor/hamaadraza/php-impersonate/bin/php-impersonate-install`, '
-                . 'or use the FFI engine. Checked paths: %s',
-                PlatformDetector::getPlatformDescription(),
-                implode(', ', $checked)
-            ));
-        }
 
         throw new RuntimeException(sprintf(
             "curl-impersonate binary not found for %s. This platform is not bundled; "
@@ -250,49 +235,37 @@ class Browser implements BrowserInterface
 
         $output = $this->runVersion($path, $platform);
 
-        if ($output === null) {
-            $this->verificationUnavailable = true;
-
-            return false;
-        }
-
-        return self::$verifiedBinaries[$path] = str_contains($output, 'IMPERSONATE');
+        return self::$verifiedBinaries[$path] = $output !== null && str_contains($output, 'IMPERSONATE');
     }
 
     /**
-     * The output of `<path> --version`, or null when no way to run it exists.
+     * The output of `<path> --version`, or null when it could not be run.
+     *
+     * proc_open() in array mode only: resolveExecutablePath() has already
+     * required the function, and array mode hands the path to the OS verbatim,
+     * so a `%`, `!`, space or quote in an install path needs no escaping — the
+     * escapeshellarg() fallback that used to sit here mangled `%` and `!` on
+     * Windows.
      */
     private function runVersion(string $path, string $platform): ?string
     {
-        if (function_exists('proc_open')) {
-            $process = @proc_open(
-                [$path, '--version'],
-                [0 => ['pipe', 'r'], 1 => ['pipe', 'w'], 2 => ['pipe', 'w']],
-                $pipes
-            );
+        $process = @proc_open(
+            [$path, '--version'],
+            [0 => ['pipe', 'r'], 1 => ['pipe', 'w'], 2 => ['pipe', 'w']],
+            $pipes
+        );
 
-            if (! is_resource($process)) {
-                return '';
-            }
-
-            fclose($pipes[0]);
-            $output = (string) stream_get_contents($pipes[1]);
-            fclose($pipes[1]);
-            fclose($pipes[2]);
-            proc_close($process);
-
-            return $output;
+        if (! is_resource($process)) {
+            return null;
         }
 
-        // Since PHP 8.0 a name in disable_functions behaves as undefined and
-        // throws an Error, which `@` cannot suppress — so ask first.
-        if (function_exists('shell_exec')) {
-            $errorRedirect = $platform === PlatformDetector::PLATFORM_WINDOWS ? '2>nul' : '2>/dev/null';
+        fclose($pipes[0]);
+        $output = (string) stream_get_contents($pipes[1]);
+        fclose($pipes[1]);
+        fclose($pipes[2]);
+        proc_close($process);
 
-            return (string) shell_exec(escapeshellarg($path) . ' --version ' . $errorRedirect);
-        }
-
-        return null;
+        return $output;
     }
 
     /**

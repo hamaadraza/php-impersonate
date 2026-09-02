@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 namespace Raza\PHPImpersonate\Tests;
 
 use ReflectionClass;
@@ -135,13 +137,28 @@ class ProcessCommandTest extends TestCase
 
             $contents = $built['files'][substr($value, 1)] ?? '';
             foreach (explode("\n", trim($contents)) as $line) {
-                if ($line !== '') {
+                // `Name:` with nothing after it is libcurl's removal form — the
+                // browser-like suppressions (Expect, a bodyless POST's
+                // Content-Type), covered by BrowserLikeHeadersTest — not a header.
+                if ($line !== '' && ! preg_match('/^[^:\s]+:$/', $line)) {
                     $lines[] = $line;
                 }
             }
         }
 
         return $lines;
+    }
+
+    /**
+     * The header file always ends with libcurl's removal line for Expect, so
+     * curl never adds `Expect: 100-continue` to a large HTTP/1.1 body.
+     */
+    public function testExpectIsSuppressedThroughTheHeaderFile(): void
+    {
+        $built = $this->build(['User-Agent' => 'A/1']);
+        $all = implode("\n", $built['files']);
+
+        $this->assertStringContainsString("\nExpect:\n", "\n" . $all . "\n");
     }
 
     public function testCallerHeaderReplacesProfileHeader(): void

@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 namespace Raza\PHPImpersonate\Tests;
 
 use InvalidArgumentException;
@@ -405,6 +407,11 @@ class RequestPreparerTest extends TestCase
             'NUL in value' => ['X-Foo', "bar\0"],
             'colon in name' => ['X:Foo', 'bar'],
             'empty name' => ['', 'bar'],
+            // RFC 9110 §5.1: a name is a token. These went out and got a 400.
+            'space in name' => ['X Bad Name', 'v'],
+            'non-ASCII name' => ["X-Caf\xc3\xa9", 'v'],
+            'tab in name' => ["X\tFoo", 'v'],
+            'parenthesis in name' => ['X(Foo)', 'v'],
         ];
     }
 
@@ -418,6 +425,9 @@ class RequestPreparerTest extends TestCase
     public function testAssertHeaderIsSafeAllowsNormalHeader(): void
     {
         RequestPreparer::assertHeaderIsSafe('X-Custom', 'some value; q=0.9');
-        $this->addToAssertionCount(1);
+        // Every token character is legal in a name, and a value may carry
+        // anything but CR/LF/NUL — UTF-8 included.
+        RequestPreparer::assertHeaderIsSafe("!#$%&'*+-.^_`|~09AZaz", "caf\xc3\xa9 \"quoted\" (parens)");
+        $this->addToAssertionCount(2);
     }
 }

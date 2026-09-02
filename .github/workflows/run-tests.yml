@@ -34,41 +34,6 @@ permissions:
 
 jobs:
   # ===========================================
-  # Lint on the lowest supported PHP versions
-  # The test tooling (Pest 3) needs PHP 8.2+, but the library itself claims
-  # "php": "^8". This syntax-checks the shipped code on 8.0/8.1 so that claim
-  # stays honest without pulling in the newer-PHP dev dependencies.
-  # ===========================================
-  lint-lowest-php:
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    strategy:
-      fail-fast: false
-      matrix:
-        php: ['8.0', '8.1']
-
-    name: Lint (PHP ${{ matrix.php }})
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-
-      - name: Setup PHP
-        uses: shivammathur/setup-php@f3e473d116dcccaddc5834248c87452386958240 # v2
-        with:
-          php-version: ${{ matrix.php }}
-          coverage: none
-
-      - name: Syntax-check shipped PHP files
-        run: |
-          fail=0
-          files="$(find src scripts/lib -name '*.php'; echo bin/php-impersonate-install)"
-          for f in $files; do
-            php -l "$f" > /dev/null || fail=1
-          done
-          exit $fail
-
-  # ===========================================
   # Static analysis (PHPStan) and dependency audit
   # ===========================================
   phpstan:

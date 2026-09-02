@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 namespace Raza\PHPImpersonate\Support;
 
 /**
@@ -13,6 +15,8 @@ namespace Raza\PHPImpersonate\Support;
  * The status line is returned separately from the header map: it is not a
  * header, so callers iterating headers() never have to filter out a synthetic
  * entry that was never on the wire.
+ *
+ * @internal Not part of the public API.
  */
 final class ResponseHeaderParser
 {

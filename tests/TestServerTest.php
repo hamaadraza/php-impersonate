@@ -50,4 +50,42 @@ class TestServerTest extends TestCase
             'empty' => [[], null],
         ];
     }
+
+    /**
+     * go-httpbin (what CI runs) renders request headers, query arguments and
+     * form fields as lists of strings; the Python httpbin renders them as
+     * strings. The accessor must make the two indistinguishable, and leave
+     * everything else — `json`, `cookies`, `data` — alone.
+     */
+    public function testJsonFlattensGoHttpbinListsToStrings(): void
+    {
+        $go = new \Raza\PHPImpersonate\Response(json_encode([
+            "headers" => ["X-Custom" => ["abc"], "Accept" => ["a", "b"]],
+            "args" => ["q" => ["1"]],
+            "form" => ["name" => ["Ada"]],
+            "json" => ["n" => 2],
+            "cookies" => ["session" => "abc123"],
+            "data" => "raw",
+        ]), 200, []);
+
+        $flat = TestServer::json($go);
+
+        $this->assertSame("abc", $flat["headers"]["X-Custom"]);
+        $this->assertSame("a, b", $flat["headers"]["Accept"], "repeats join the way the Python httpbin joins them");
+        $this->assertSame("1", $flat["args"]["q"]);
+        $this->assertSame("Ada", $flat["form"]["name"]);
+        $this->assertSame(["n" => 2], $flat["json"]);
+        $this->assertSame(["session" => "abc123"], $flat["cookies"]);
+        $this->assertSame("raw", $flat["data"]);
+    }
+
+    public function testJsonLeavesThePythonShapeUntouched(): void
+    {
+        $python = new \Raza\PHPImpersonate\Response(json_encode([
+            "headers" => ["X-Custom" => "abc"],
+            "form" => ["name" => "Ada"],
+        ]), 200, []);
+
+        $this->assertSame(["headers" => ["X-Custom" => "abc"], "form" => ["name" => "Ada"]], TestServer::json($python));
+    }
 }

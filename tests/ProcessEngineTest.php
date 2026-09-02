@@ -37,7 +37,7 @@ class ProcessEngineTest extends TestCase
         $response = $this->process('firefox147')->sendGet(TestServer::httpbin('/get'));
 
         $this->assertSame(200, $response->status());
-        $this->assertStringContainsString('Firefox/147', $response->json()['headers']['User-Agent'] ?? '');
+        $this->assertStringContainsString('Firefox/147', TestServer::json($response)['headers']['User-Agent'] ?? '');
     }
 
     public function testPostJsonBody(): void
@@ -47,13 +47,13 @@ class ProcessEngineTest extends TestCase
         ]);
 
         $this->assertSame(200, $response->status());
-        $this->assertEquals(['name' => 'x', 'n' => 2], $response->json()['json']);
+        $this->assertEquals(['name' => 'x', 'n' => 2], TestServer::json($response)['json']);
     }
 
     public function testCustomHeaderIsSent(): void
     {
         $response = $this->process('chrome146')->sendGet(TestServer::httpbin('/headers'), ['X-Custom' => 'abc']);
-        $this->assertSame('abc', $response->json()['headers']['X-Custom'] ?? null);
+        $this->assertSame('abc', TestServer::json($response)['headers']['X-Custom'] ?? null);
     }
 
     public function testHeadHasEmptyBody(): void
@@ -85,6 +85,6 @@ class ProcessEngineTest extends TestCase
         ));
 
         $this->assertSame(200, $response->status());
-        $this->assertSame('9', $response->json()['headers']['Content-Length'] ?? null);
+        $this->assertSame('9', TestServer::json($response)['headers']['Content-Length'] ?? null);
     }
 }

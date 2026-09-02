@@ -26,7 +26,7 @@ class TlsApiConnectionTest extends TestCase
         $this->assertEquals(200, $response->status());
         $this->assertNotEmpty($response->body());
 
-        $data = $response->json();
+        $data = TestServer::json($response);
         $this->assertIsArray($data);
         $this->assertArrayHasKey('tls', $data);
         $this->assertArrayHasKey('user_agent', $data);
@@ -43,7 +43,7 @@ class TlsApiConnectionTest extends TestCase
 
         $this->assertEquals(200, $response->status());
 
-        $data = $response->json();
+        $data = TestServer::json($response);
 
         // Verify top-level keys (based on actual API response)
         $expectedKeys = [
@@ -105,13 +105,13 @@ class TlsApiConnectionTest extends TestCase
         // Test GET
         $response = $client->sendGet(TestServer::tls());
         $this->assertEquals(200, $response->status());
-        $data = $response->json();
+        $data = TestServer::json($response);
         $this->assertEquals('GET', $data['method']);
 
         // Test POST
         $response = $client->sendPost(TestServer::tls(), ['test' => 'data']);
         $this->assertEquals(200, $response->status());
-        $data = $response->json();
+        $data = TestServer::json($response);
         $this->assertEquals('POST', $data['method']);
 
         // Test HEAD
@@ -133,7 +133,7 @@ class TlsApiConnectionTest extends TestCase
         $response = $client->sendGet(TestServer::tls(), $customHeaders);
         $this->assertEquals(200, $response->status());
 
-        $data = $response->json();
+        $data = TestServer::json($response);
 
         // Verify that TLS fingerprinting still works with custom headers
         $this->assertArrayHasKey('tls', $data);
@@ -158,7 +158,7 @@ class TlsApiConnectionTest extends TestCase
             $response = $client->sendGet(TestServer::tls());
             $this->assertEquals(200, $response->status());
 
-            $data = $response->json();
+            $data = TestServer::json($response);
             $this->assertArrayHasKey('tls', $data);
             $this->assertArrayHasKey('ja3', $data['tls']);
             $this->assertNotEmpty($data['tls']['ja3']);
@@ -195,7 +195,7 @@ class TlsApiConnectionTest extends TestCase
 
         $this->assertEquals(200, $response->status());
 
-        $data = $response->json();
+        $data = TestServer::json($response);
         $this->assertArrayHasKey('user_agent', $data);
         $this->assertArrayHasKey('tls', $data);
         $this->assertArrayHasKey('ja3', $data['tls']);

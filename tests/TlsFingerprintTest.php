@@ -24,7 +24,7 @@ class TlsFingerprintTest extends TestCase
 
         $this->assertEquals(200, $response->status());
 
-        $data = $response->json();
+        $data = TestServer::json($response);
         $this->assertArrayHasKey('tls', $data);
         $this->assertArrayHasKey('user_agent', $data);
 
@@ -60,7 +60,7 @@ class TlsFingerprintTest extends TestCase
 
         $this->assertEquals(200, $response->status());
 
-        $data = $response->json();
+        $data = TestServer::json($response);
         $this->assertArrayHasKey('tls', $data);
         $this->assertArrayHasKey('user_agent', $data);
 
@@ -96,7 +96,7 @@ class TlsFingerprintTest extends TestCase
 
         $this->assertEquals(200, $response->status());
 
-        $data = $response->json();
+        $data = TestServer::json($response);
         $this->assertArrayHasKey('tls', $data);
         $this->assertArrayHasKey('user_agent', $data);
 
@@ -131,7 +131,7 @@ class TlsFingerprintTest extends TestCase
 
         $this->assertEquals(200, $response->status());
 
-        $data = $response->json();
+        $data = TestServer::json($response);
         $this->assertArrayHasKey('tls', $data);
         $this->assertArrayHasKey('user_agent', $data);
 
@@ -166,7 +166,7 @@ class TlsFingerprintTest extends TestCase
 
         $this->assertEquals(200, $response->status());
 
-        $data = $response->json();
+        $data = TestServer::json($response);
         $this->assertArrayHasKey('tls', $data);
         $this->assertArrayHasKey('user_agent', $data);
 
@@ -201,7 +201,7 @@ class TlsFingerprintTest extends TestCase
 
         $this->assertEquals(200, $response->status());
 
-        $data = $response->json();
+        $data = TestServer::json($response);
         $this->assertArrayHasKey('tls', $data);
         $this->assertArrayHasKey('user_agent', $data);
 
@@ -237,7 +237,7 @@ class TlsFingerprintTest extends TestCase
 
         $this->assertEquals(200, $response->status());
 
-        $data = $response->json();
+        $data = TestServer::json($response);
         $this->assertArrayHasKey('tls', $data);
         $this->assertArrayHasKey('user_agent', $data);
 
@@ -276,7 +276,7 @@ class TlsFingerprintTest extends TestCase
 
             $this->assertEquals(200, $response->status());
 
-            $data = $response->json();
+            $data = TestServer::json($response);
             $this->assertArrayHasKey('tls', $data);
             $this->assertArrayHasKey('ja3', $data['tls']);
 
@@ -329,7 +329,7 @@ class TlsFingerprintTest extends TestCase
             $this->assertNotNull($response, "Failed to get response for $browser after $maxRetries attempts");
             $this->assertEquals(200, $response->status(), "Failed to get 200 status for $browser");
 
-            $data = $response->json();
+            $data = TestServer::json($response);
             $this->assertArrayHasKey('tls', $data, "Missing 'tls' key for $browser");
             $this->assertArrayHasKey('ja4', $data['tls'], "Missing 'ja4' key for $browser");
 
@@ -354,7 +354,7 @@ class TlsFingerprintTest extends TestCase
 
         $this->assertEquals(200, $response->status());
 
-        $data = $response->json();
+        $data = TestServer::json($response);
         $this->assertArrayHasKey('tls', $data);
         $this->assertArrayHasKey('extensions', $data['tls']);
 
@@ -387,7 +387,7 @@ class TlsFingerprintTest extends TestCase
 
         $this->assertEquals(200, $response->status());
 
-        $data = $response->json();
+        $data = TestServer::json($response);
         $this->assertArrayHasKey('http2', $data);
         $this->assertArrayHasKey('sent_frames', $data['http2']);
 
@@ -419,7 +419,7 @@ class TlsFingerprintTest extends TestCase
 
         $this->assertEquals(200, $response->status());
 
-        $data = $response->json();
+        $data = TestServer::json($response);
         $this->assertArrayHasKey('tls', $data);
         $this->assertArrayHasKey('ciphers', $data['tls']);
 
@@ -448,7 +448,7 @@ class TlsFingerprintTest extends TestCase
 
         $this->assertEquals(200, $response->status());
 
-        $data = $response->json();
+        $data = TestServer::json($response);
         $this->assertArrayHasKey('tls', $data);
         $this->assertArrayHasKey('user_agent', $data);
 
@@ -470,7 +470,7 @@ class TlsFingerprintTest extends TestCase
 
         $this->assertEquals(200, $response->status());
 
-        $data = $response->json();
+        $data = TestServer::json($response);
         $this->assertArrayHasKey('tls', $data);
         $this->assertArrayHasKey('user_agent', $data);
 
@@ -498,7 +498,7 @@ class TlsFingerprintTest extends TestCase
 
         $this->assertEquals(200, $response->status());
 
-        $data = $response->json();
+        $data = TestServer::json($response);
         $this->assertArrayHasKey('tls', $data);
         $this->assertArrayHasKey('user_agent', $data);
 
@@ -525,7 +525,7 @@ class TlsFingerprintTest extends TestCase
 
         $this->assertEquals(200, $response->status());
 
-        $data = $response->json();
+        $data = TestServer::json($response);
         $this->assertArrayHasKey('tls', $data);
         $this->assertArrayHasKey('user_agent', $data);
 

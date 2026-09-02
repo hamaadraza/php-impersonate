@@ -34,7 +34,7 @@ class ApiTest extends TestCase
         ]);
 
         $this->assertEquals(200, $response->status());
-        $responseData = $response->json();
+        $responseData = TestServer::json($response);
         $this->assertEquals('test-value', $responseData['headers']['X-Test-Header']);
     }
 
@@ -69,7 +69,7 @@ class ApiTest extends TestCase
         ]);
 
         $this->assertEquals(200, $response->status());
-        $responseData = $response->json();
+        $responseData = TestServer::json($response);
         $this->assertEquals('test-value', $responseData['headers']['X-Test-Header']);
         $this->assertEquals('John Doe', $responseData['form']['name']);
         $this->assertEquals('john.doe@example.com', $responseData['form']['email']);
@@ -92,7 +92,7 @@ class ApiTest extends TestCase
         $response = $client->sendPost(TestServer::httpbin('/post'), $formData);
 
         $this->assertEquals(200, $response->status());
-        $responseData = $response->json();
+        $responseData = TestServer::json($response);
         $this->assertEquals('testuser', $responseData['form']['user']);
         $this->assertEquals('password123', $responseData['form']['password']);
     }
@@ -137,7 +137,7 @@ class ApiTest extends TestCase
         ]);
 
         $this->assertEquals(200, $response->status());
-        $responseData = $response->json();
+        $responseData = TestServer::json($response);
         $this->assertEquals('test-value', $responseData['headers']['X-Test-Header']);
     }
 
@@ -173,7 +173,7 @@ class ApiTest extends TestCase
         ]);
 
         $this->assertEquals(200, $response->status());
-        $responseData = $response->json();
+        $responseData = TestServer::json($response);
         $this->assertEquals('test-value', $responseData['headers']['X-Test-Header']);
 
         // Data is in json field, not form
@@ -199,7 +199,7 @@ class ApiTest extends TestCase
         $response = $client->sendPatch(TestServer::httpbin('/patch'), $data);
 
         $this->assertEquals(200, $response->status());
-        $responseData = $response->json();
+        $responseData = TestServer::json($response);
 
         // Data is in json field with default Content-Type
         $this->assertNotNull($responseData['json']);
@@ -226,7 +226,7 @@ class ApiTest extends TestCase
         ]);
 
         $this->assertEquals(200, $response->status());
-        $responseData = $response->json();
+        $responseData = TestServer::json($response);
         $this->assertEquals('test-value', $responseData['headers']['X-Test-Header']);
 
         // Check for data in various possible locations
@@ -262,7 +262,7 @@ class ApiTest extends TestCase
         $response = $client->sendPut(TestServer::httpbin('/put'), $data);
 
         $this->assertEquals(200, $response->status());
-        $responseData = $response->json();
+        $responseData = TestServer::json($response);
 
         // Data is in json field with default Content-Type
         $this->assertNotNull($responseData['json']);
@@ -303,7 +303,7 @@ class ApiTest extends TestCase
         $response = PHPImpersonate::get(TestServer::httpbin('/headers'), $headers);
 
         $this->assertEquals(200, $response->status());
-        $responseData = $response->json();
+        $responseData = TestServer::json($response);
 
         // Check that our custom header is present
         $this->assertEquals('CustomValue', $responseData['headers']['X-Custom-Header']);
@@ -393,7 +393,7 @@ class ApiTest extends TestCase
         ]);
 
         $this->assertEquals(200, $response->status());
-        $responseData = $response->json();
+        $responseData = TestServer::json($response);
         $this->assertEquals('test-value', $responseData['headers']['X-Test-Header']);
         $this->assertEquals('John Doe', $responseData['form']['name']);
         $this->assertEquals('john.doe@example.com', $responseData['form']['email']);
@@ -417,7 +417,7 @@ class ApiTest extends TestCase
         ]);
 
         $this->assertEquals(200, $response->status());
-        $responseData = $response->json();
+        $responseData = TestServer::json($response);
         $this->assertEquals('test-value', $responseData['headers']['X-Test-Header']);
 
         // Data should be in the json field when Content-Type is application/json
@@ -444,7 +444,7 @@ class ApiTest extends TestCase
         $response = PHPImpersonate::get(TestServer::httpbin('/headers'), $headers);
 
         $this->assertEquals(200, $response->status());
-        $responseData = $response->json();
+        $responseData = TestServer::json($response);
 
         // Verify both headers were sent correctly
         $this->assertStringContainsString('session=' . $largeValue, $responseData['headers']['Cookie']);
@@ -469,7 +469,7 @@ class ApiTest extends TestCase
         $response = PHPImpersonate::get(TestServer::httpbin('/headers'), $headers);
 
         $this->assertEquals(200, $response->status());
-        $responseData = $response->json();
+        $responseData = TestServer::json($response);
 
         // Verify all headers were sent correctly
         $this->assertEquals(str_repeat('a', 3000), $responseData['headers']['X-Large-Header-1']);
@@ -495,7 +495,7 @@ class ApiTest extends TestCase
         ]);
 
         $this->assertEquals(200, $response->status());
-        $responseData = $response->json();
+        $responseData = TestServer::json($response);
 
         // Verify cookie was sent
         $this->assertStringContainsString('large_cookie=' . $largeCookie, $responseData['headers']['Cookie']);

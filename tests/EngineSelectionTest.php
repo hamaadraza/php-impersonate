@@ -20,6 +20,48 @@ class EngineSelectionTest extends TestCase
         $this->assertIsBool(PHPImpersonate::ffiAvailable());
     }
 
+    /**
+     * The reason is the diagnostic that turns "auto silently used the
+     * executable" into something an operator can act on.
+     */
+    public function testTheReasonIsNullExactlyWhenTheEngineIsAvailable(): void
+    {
+        $reason = PHPImpersonate::ffiUnavailableReason();
+
+        if (PHPImpersonate::ffiAvailable()) {
+            $this->assertNull($reason);
+        } else {
+            $this->assertIsString($reason);
+            $this->assertNotSame('', $reason);
+        }
+    }
+
+    public function testABrokenLibraryIsReportedWithItsPath(): void
+    {
+        if (! PHPImpersonate::ffiAvailable()) {
+            $this->markTestSkipped('Needs a working FFI engine to break.');
+        }
+
+        $saved = getenv(LibResolver::ENV_VAR);
+
+        try {
+            $bogus = (string) tempnam(sys_get_temp_dir(), 'not_a_library');
+            file_put_contents($bogus, "definitely not an ELF object\n");
+            putenv(LibResolver::ENV_VAR . '=' . $bogus);
+            LibResolver::clearCache();
+
+            $this->assertFalse(PHPImpersonate::ffiAvailable());
+            $this->assertStringContainsString($bogus, (string) PHPImpersonate::ffiUnavailableReason());
+            $this->assertStringContainsString('could not be loaded', (string) PHPImpersonate::ffiUnavailableReason());
+        } finally {
+            $saved === false ? putenv(LibResolver::ENV_VAR) : putenv(LibResolver::ENV_VAR . "=$saved");
+            LibResolver::clearCache();
+            if (isset($bogus)) {
+                @unlink($bogus);
+            }
+        }
+    }
+
     public function testDefaultEngineMatchesAvailability(): void
     {
         $expected = PHPImpersonate::ffiAvailable()

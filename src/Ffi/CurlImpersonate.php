@@ -109,6 +109,28 @@ final class CurlImpersonate
     }
 
     /**
+     * Ask the loaded library to apply a profile, without sending anything.
+     *
+     * Loading the library and creating a handle proves less than it seems: on
+     * an Alpine leg the library loaded, the handle came up, and then every
+     * call to curl_easy_impersonate() answered CURLE_UNKNOWN_OPTION (48) — a
+     * code the profile table never returns for an unknown NAME (that is 43),
+     * only for a setopt the library made on its own behalf that landed
+     * somewhere it did not expect, such as a second libcurl already loaded
+     * into the PHP process. Whatever the cause, an engine that cannot apply
+     * its default profile is not available, and this is how it is found out
+     * BEFORE it is chosen.
+     *
+     * @return int libcurl's return code; 0 means the profile applied.
+     */
+    public function probeTarget(string $browser): int
+    {
+        $this->ffi->curl_easy_reset($this->handle);
+
+        return (int) $this->ffi->curl_easy_impersonate($this->handle, $browser, 1);
+    }
+
+    /**
      * Whether FFI is usable in this SAPI at all (independent of library presence).
      */
     public static function isSupported(): bool

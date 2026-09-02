@@ -169,11 +169,11 @@ class EngineParityTest extends TestCase
      */
     private function headerOrder(string $engine): array
     {
-        $body = (new PHPImpersonate('chrome146', 30, [], $engine))->sendGet(
+        $body = TestServer::json((new PHPImpersonate('chrome146', 30, [], $engine))->sendGet(
             TestServer::tls(),
             // One header that overrides the profile's, one the profile lacks.
             ['Accept-Language' => 'de-DE', 'Authorization' => 'Bearer parity']
-        )->json();
+        ));
 
         foreach ($body['http2']['sent_frames'] ?? [] as $frame) {
             if (($frame['frame_type'] ?? '') !== 'HEADERS') {
@@ -198,8 +198,8 @@ class EngineParityTest extends TestCase
 
         // referer is sent verbatim, and max-redirs caps the redirect chain — the
         // same way on both engines (the shared, typed option map).
-        $referer = fn (string $engine): string => (new PHPImpersonate('chrome146', 30, ['referer' => 'https://ref.test/x'], $engine))
-            ->sendGet(TestServer::httpbin('/headers'))->json()['headers']['Referer'] ?? '';
+        $referer = fn (string $engine): string => TestServer::json((new PHPImpersonate('chrome146', 30, ['referer' => 'https://ref.test/x'], $engine))
+            ->sendGet(TestServer::httpbin('/headers')))['headers']['Referer'] ?? '';
 
         $this->assertSame('https://ref.test/x', $referer(PHPImpersonate::ENGINE_FFI));
         $this->assertSame('https://ref.test/x', $referer(PHPImpersonate::ENGINE_PROCESS));
@@ -224,11 +224,11 @@ class EngineParityTest extends TestCase
         TestServer::requireHttpbin($this);
 
         $sent = function (string $engine): array {
-            return (new PHPImpersonate('chrome146', 30, [], $engine))
+            return TestServer::json((new PHPImpersonate('chrome146', 30, [], $engine))
                 ->sendGet(TestServer::httpbin('/headers'), [
                     'User-Agent' => 'MyCustomAgent/1.0',
                     'Accept-Language' => 'de-DE',
-                ])->json()['headers'] ?? [];
+                ]))['headers'] ?? [];
         };
 
         foreach ([PHPImpersonate::ENGINE_FFI, PHPImpersonate::ENGINE_PROCESS] as $engine) {
@@ -247,8 +247,8 @@ class EngineParityTest extends TestCase
 
         // The replace rule must not swallow the profile when nothing overrides it.
         foreach ([PHPImpersonate::ENGINE_FFI, PHPImpersonate::ENGINE_PROCESS] as $engine) {
-            $headers = (new PHPImpersonate('chrome146', 30, [], $engine))
-                ->sendGet(TestServer::httpbin('/headers'))->json()['headers'] ?? [];
+            $headers = TestServer::json((new PHPImpersonate('chrome146', 30, [], $engine))
+                ->sendGet(TestServer::httpbin('/headers')))['headers'] ?? [];
 
             $this->assertStringContainsString('Chrome/146', $headers['User-Agent'] ?? '', "$engine lost the profile UA");
         }
@@ -270,8 +270,8 @@ class EngineParityTest extends TestCase
                 ->sendGet(TestServer::httpbin('/headers'));
 
             $this->assertSame(200, $response->status(), "$engine did not return a clean 200");
-            $this->assertIsArray($response->json(), "$engine returned a corrupted body");
-            $bodies[$engine] = $response->json()['headers']['User-Agent'] ?? null;
+            $this->assertIsArray(TestServer::json($response), "$engine returned a corrupted body");
+            $bodies[$engine] = TestServer::json($response)['headers']['User-Agent'] ?? null;
         }
 
         $this->assertSame(
@@ -302,7 +302,7 @@ class EngineParityTest extends TestCase
 
             $this->assertSame(200, $response->status(), "$engine did not return 200");
 
-            $forms[$engine] = $response->json()['form'] ?? [];
+            $forms[$engine] = TestServer::json($response)['form'] ?? [];
             $this->assertSame(
                 ['name' => 'Ada', 'role' => 'eng'],
                 $forms[$engine],
@@ -338,10 +338,10 @@ class EngineParityTest extends TestCase
         TestServer::requireHttpbin($this);
 
         foreach ([PHPImpersonate::ENGINE_FFI, PHPImpersonate::ENGINE_PROCESS] as $engine) {
-            $body = (new PHPImpersonate('chrome146', 30, [], $engine))->sendPost(
+            $body = TestServer::json((new PHPImpersonate('chrome146', 30, [], $engine))->sendPost(
                 TestServer::httpbin('/redirect-to?url=%2Fanything&status_code=' . $status),
                 ['a' => '1']
-            )->json();
+            ));
 
             $this->assertSame(
                 $expectedMethod,
@@ -382,7 +382,7 @@ class EngineParityTest extends TestCase
             $r = (new PHPImpersonate('chrome146', 30, [], $engine))
                 ->send(new Request('GET', TestServer::httpbin('/anything'), [], 'q=1'));
 
-            return $r->json()['method'] ?? '';
+            return TestServer::json($r)['method'] ?? '';
         };
 
         $this->assertSame('GET', $method(PHPImpersonate::ENGINE_FFI), 'FFI turned GET+body into another method');
@@ -409,7 +409,7 @@ class EngineParityTest extends TestCase
 
         $this->assertSame(200, $response->status(), "$browser/$engine: the TLS service did not return 200");
 
-        $ja4 = $response->json()['tls']['ja4'] ?? null;
+        $ja4 = TestServer::json($response)['tls']['ja4'] ?? null;
 
         $this->assertIsString($ja4, "$browser/$engine: the response carried no JA4 fingerprint");
         $this->assertNotSame('', $ja4, "$browser/$engine: the response carried an empty JA4 fingerprint");

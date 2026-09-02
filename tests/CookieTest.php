@@ -46,7 +46,7 @@ class CookieTest extends TestCase
             ->sendGet(TestServer::httpbin('/cookies/set?session=abc123'));
 
         $this->assertSame(200, $response->status());
-        $this->assertSame(['session' => 'abc123'], $response->json()['cookies'] ?? null, "$engine dropped the cookie on the hop");
+        $this->assertSame(['session' => 'abc123'], TestServer::json($response)['cookies'] ?? null, "$engine dropped the cookie on the hop");
     }
 
     #[DataProvider('engineProvider')]
@@ -82,13 +82,13 @@ class CookieTest extends TestCase
 
         // Same key, so the same cached handle.
         $second = new PHPImpersonate('chrome146', 30, [], PHPImpersonate::ENGINE_FFI);
-        $seen = $second->sendGet(TestServer::httpbin('/cookies'))->json()['cookies'] ?? null;
+        $seen = TestServer::json($second->sendGet(TestServer::httpbin('/cookies')))['cookies'] ?? null;
 
         $this->assertSame([], $seen, 'a cookie from one request leaked into the next on the shared handle');
 
         // Nor does the first client itself keep it: the engine is per request,
         // and persisting a session is the caller's job via setCookieHeaders().
-        $this->assertSame([], $first->sendGet(TestServer::httpbin('/cookies'))->json()['cookies'] ?? null);
+        $this->assertSame([], TestServer::json($first->sendGet(TestServer::httpbin('/cookies')))['cookies'] ?? null);
     }
 
     #[DataProvider('engineProvider')]

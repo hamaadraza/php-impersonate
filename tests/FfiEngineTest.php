@@ -52,7 +52,7 @@ class FfiEngineTest extends TestCase
         $response = $this->ffi('firefox147')->sendGet(TestServer::httpbin('/get'));
 
         $this->assertSame(200, $response->status());
-        $ua = $response->json()['headers']['User-Agent'] ?? '';
+        $ua = TestServer::json($response)['headers']['User-Agent'] ?? '';
         $this->assertStringContainsString('Firefox/147', $ua);
     }
 
@@ -63,13 +63,13 @@ class FfiEngineTest extends TestCase
         ]);
 
         $this->assertSame(200, $response->status());
-        $this->assertEquals(['name' => 'x', 'n' => 2], $response->json()['json']);
+        $this->assertEquals(['name' => 'x', 'n' => 2], TestServer::json($response)['json']);
     }
 
     public function testCustomHeaderIsSent(): void
     {
         $response = $this->ffi('chrome146')->sendGet(TestServer::httpbin('/headers'), ['X-Custom' => 'abc']);
-        $this->assertSame('abc', $response->json()['headers']['X-Custom'] ?? null);
+        $this->assertSame('abc', TestServer::json($response)['headers']['X-Custom'] ?? null);
     }
 
     public function testHeadHasEmptyBody(): void
@@ -85,7 +85,7 @@ class FfiEngineTest extends TestCase
         $response = $this->ffi('chrome146')->sendGet(TestServer::httpbin('/gzip'));
 
         $this->assertSame(200, $response->status());
-        $this->assertIsArray($response->json()); // json() would throw if still gzip
+        $this->assertIsArray(TestServer::json($response)); // json() would throw if still gzip
     }
 
     /**
@@ -175,7 +175,7 @@ class FfiEngineTest extends TestCase
         ));
 
         $this->assertSame(200, $response->status());
-        $this->assertSame('9', $response->json()['headers']['Content-Length'] ?? null);
+        $this->assertSame('9', TestServer::json($response)['headers']['Content-Length'] ?? null);
     }
 
     public function testProxyOptionIsApplied(): void

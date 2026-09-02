@@ -155,6 +155,7 @@ new PHPImpersonate('chrome146', engine: PHPImpersonate::ENGINE_FFI);      // FFI
 new PHPImpersonate('chrome146', engine: PHPImpersonate::ENGINE_PROCESS);  // always the executable
 
 PHPImpersonate::ffiAvailable();                 // is the FFI engine usable here?
+PHPImpersonate::ffiUnavailableReason();         // …and if not, why (null when it is)
 (new PHPImpersonate('chrome146'))->engine();    // 'ffi' or 'process' — what was chosen
 ```
 
@@ -170,6 +171,15 @@ platform (bundled for [common platforms](#supported-platforms);
 > The FFI engine is **POSIX-only** (Linux and macOS). On Windows the executable
 > engine is always used — `auto` handles this transparently, so nothing changes
 > for you; the fingerprints are identical either way.
+
+> [!WARNING]
+> **Official `php:*-alpine` Docker images**: their `php` binary has ext-curl's
+> libcurl compiled in, and on musl the bundled `libcurl-impersonate` then
+> cannot apply a profile (its own internal calls resolve to that built-in
+> libcurl). `ffiAvailable()` detects this — it checks that the default profile
+> actually applies, not just that the library loads — and `auto` uses the
+> executable engine instead. `ffiUnavailableReason()` spells it out. The glibc
+> images and every non-Docker install are unaffected.
 
 ---
 

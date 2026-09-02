@@ -24,7 +24,7 @@ class TlsDetailedFingerprintTest extends TestCase
 
         $this->assertEquals(200, $response->status());
 
-        $data = $response->json();
+        $data = TestServer::json($response);
         $tls = $data['tls'];
 
         // Verify specific Chrome 110 User-Agent
@@ -62,7 +62,7 @@ class TlsDetailedFingerprintTest extends TestCase
 
         $this->assertEquals(200, $response->status());
 
-        $data = $response->json();
+        $data = TestServer::json($response);
         $tls = $data['tls'];
 
         // Verify specific Chrome 99 Android User-Agent
@@ -101,7 +101,7 @@ class TlsDetailedFingerprintTest extends TestCase
 
         $this->assertEquals(200, $response->status());
 
-        $data = $response->json();
+        $data = TestServer::json($response);
         $tls = $data['tls'];
 
         // Verify specific Firefox 133 User-Agent
@@ -139,7 +139,7 @@ class TlsDetailedFingerprintTest extends TestCase
 
         $this->assertEquals(200, $response->status());
 
-        $data = $response->json();
+        $data = TestServer::json($response);
         $tls = $data['tls'];
 
         // Verify specific Safari 153 User-Agent
@@ -181,7 +181,7 @@ class TlsDetailedFingerprintTest extends TestCase
             $response = $client->sendGet(TestServer::tls());
             $this->assertEquals(200, $response->status());
 
-            $data = $response->json();
+            $data = TestServer::json($response);
             $fingerprints[] = $data['tls']['ja3'];
 
             // Small delay to avoid rate limiting
@@ -245,7 +245,7 @@ class TlsDetailedFingerprintTest extends TestCase
             $response = $client->sendGet(TestServer::tls());
             $this->assertEquals(200, $response->status());
 
-            $data = $response->json();
+            $data = TestServer::json($response);
             $fingerprints[] = $data['tls']['ja4'];
 
             // Small delay to avoid rate limiting
@@ -290,7 +290,7 @@ class TlsDetailedFingerprintTest extends TestCase
 
             $this->assertEquals(200, $response->status());
 
-            $data = $response->json();
+            $data = TestServer::json($response);
             $ja3Fingerprints[$browserName] = $data['tls']['ja3'];
             $ja4Fingerprints[$browserName] = $data['tls']['ja4'];
 
@@ -317,7 +317,7 @@ class TlsDetailedFingerprintTest extends TestCase
 
         $this->assertEquals(200, $response->status());
 
-        $data = $response->json();
+        $data = TestServer::json($response);
         $extensions = $data['tls']['extensions'];
 
         // Get extension names in order
@@ -353,7 +353,7 @@ class TlsDetailedFingerprintTest extends TestCase
 
             $this->assertEquals(200, $response->status());
 
-            $data = $response->json();
+            $data = TestServer::json($response);
             $http2 = $data['http2'];
 
             // Find SETTINGS frame

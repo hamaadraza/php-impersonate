@@ -64,6 +64,9 @@ class PHPImpersonate implements ClientInterface
     private static ?bool $ffiProbe = null;
     private static ?string $ffiProbedLib = null;
 
+    /** Why the last {@see ffiAvailable()} answered false, for diagnostics. */
+    private static ?string $ffiUnavailableReason = null;
+
     /**
      * FFI engines shared process-wide, keyed by (library, browser) — and
      * deliberately NOT by the curl options. Sharing a handle lets keep-alive
@@ -159,12 +162,24 @@ class PHPImpersonate implements ClientInterface
     public static function ffiAvailable(): bool
     {
         if (! CurlImpersonate::isSupported()) {
+            self::$ffiUnavailableReason = PlatformDetector::isWindows()
+                ? 'No libcurl-impersonate shared library is shipped for Windows.'
+                : (extension_loaded('FFI')
+                    ? sprintf('The ffi extension is loaded but ffi.enable=%s does not permit it in the %s SAPI.', (string) ini_get('ffi.enable'), PHP_SAPI)
+                    : 'The ffi extension is not loaded.');
+
             return false;
         }
 
         // Memoised, so this is a cheap lookup rather than a filesystem walk.
         $lib = LibResolver::resolve();
         if ($lib === null) {
+            self::$ffiUnavailableReason = sprintf(
+                'No libcurl-impersonate shared library was found for %s (set %s, or run bin/php-impersonate-install).',
+                PlatformDetector::getPlatformDescription(),
+                LibResolver::ENV_VAR
+            );
+
             return false;
         }
 
@@ -175,12 +190,49 @@ class PHPImpersonate implements ClientInterface
         self::$ffiProbedLib = $lib;
 
         try {
-            new CurlImpersonate($lib); // probe that the library loads (FFI::cdef + init)
+            $engine = new CurlImpersonate($lib); // the library loads (FFI::cdef + init)
+        } catch (\Throwable $e) {
+            self::$ffiUnavailableReason = sprintf('%s could not be loaded: %s', $lib, $e->getMessage());
 
-            return self::$ffiProbe = true;
-        } catch (\Throwable) {
             return self::$ffiProbe = false;
         }
+
+        // …and can apply a profile. A library that loads but answers non-zero
+        // here would fail EVERY request with "does not support target", so it
+        // is treated as absent and 'auto' takes the executable engine instead.
+        $rc = $engine->probeTarget(self::DEFAULT_BROWSER);
+        if ($rc !== 0) {
+            self::$ffiUnavailableReason = sprintf(
+                "%s loaded, but curl_easy_impersonate('%s') returned %d. %s",
+                $lib,
+                self::DEFAULT_BROWSER,
+                $rc,
+                $rc === 48
+                    ? 'Code 48 (CURLE_UNKNOWN_OPTION) from a known target means the library\'s own setopt calls '
+                        . 'reached a different libcurl — typically the one compiled into this PHP binary for '
+                        . 'ext-curl, which precedes the shared library in the symbol lookup on this platform.'
+                    : 'The library may be older than this package\'s browser list; refresh it with `composer update-libraries`.'
+            );
+
+            return self::$ffiProbe = false;
+        }
+
+        self::$ffiUnavailableReason = null;
+
+        return self::$ffiProbe = true;
+    }
+
+    /**
+     * Why {@see ffiAvailable()} is false — the missing extension, the missing
+     * library, a library that would not load, or one that loaded but cannot
+     * apply a profile — or null when the FFI engine is available. Meant for
+     * a diagnostics page or a CI step; 'auto' already acts on it.
+     */
+    public static function ffiUnavailableReason(): ?string
+    {
+        self::ffiAvailable();
+
+        return self::$ffiUnavailableReason;
     }
 
     /**

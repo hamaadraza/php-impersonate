@@ -30,6 +30,38 @@ final class TestServer
      */
     private static array $probed = [];
 
+    /**
+     * The decoded JSON of an httpbin response, with header/query/form values
+     * normalised to strings.
+     *
+     * The two httpbin implementations disagree on shape: the Python original
+     * renders each request header, query argument and form field as a string
+     * (repeats joined with ", "), while go-httpbin — what CI runs — renders
+     * them as LISTS of strings, straight from Go's http.Header/url.Values.
+     * Every assertion in this suite was written against the Python shape and
+     * only met the Go one once httpbin became reachable in CI. Both are valid
+     * httpbin; the tests should not care which one answered.
+     *
+     * @return array<string,mixed>
+     */
+    public static function json(\Raza\PHPImpersonate\Response $response): array
+    {
+        $json = $response->json();
+
+        foreach (['headers', 'args', 'form'] as $section) {
+            if (! isset($json[$section]) || ! is_array($json[$section])) {
+                continue;
+            }
+            foreach ($json[$section] as $name => $value) {
+                if (is_array($value)) {
+                    $json[$section][$name] = implode(', ', $value);
+                }
+            }
+        }
+
+        return $json;
+    }
+
     public static function httpbin(string $path = ''): string
     {
         $base = getenv('HTTPBIN_URL') ?: 'https://httpbin.org';

@@ -16,6 +16,8 @@
 services:
   httpbin:
     image: mccutchen/go-httpbin:v2.15.0
+    environment:
+      MAX_BODY_SIZE: "8388608"   # the Expect: 100-continue test posts 1.5 MB; the default cap is 1 MiB
     ports:
       - "8080:8080"   # go-httpbin listens on 8080 inside the container
     restart: unless-stopped

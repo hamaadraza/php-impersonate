@@ -171,11 +171,14 @@ jobs:
       - name: Start local httpbin (Linux, Docker)
         if: runner.os == 'Linux'
         run: |
-          docker run -d --name httpbin -p 8080:8080 mccutchen/go-httpbin:v2.15.0
+          docker run -d --name httpbin -p 8080:8080 -e MAX_BODY_SIZE=8388608 mccutchen/go-httpbin:v2.15.0
           for i in $(seq 1 30); do curl -sf http://localhost:8080/status/200 >/dev/null && break; sleep 1; done
           curl -sf http://localhost:8080/status/200 >/dev/null || { echo "httpbin did not come up"; docker logs httpbin; exit 1; }
           echo "HTTPBIN_URL=http://localhost:8080" >> "$GITHUB_ENV"
 
+      # MAX_BODY_SIZE / -max-body-size: go-httpbin rejects request bodies over
+      # 1 MiB by default, and one test posts 1.5 MB to prove Expect: 100-continue
+      # is suppressed (curl adds it past 1 MiB).
       # No Docker on the macOS and Windows runners, and go-httpbin publishes no
       # prebuilt binaries — but every runner image ships Go, and the server is
       # a single `go install` away.
@@ -188,7 +191,7 @@ jobs:
         if: runner.os == 'macOS'
         shell: bash
         run: |
-          nohup "$(go env GOPATH)/bin/go-httpbin" -port 8080 > httpbin.log 2>&1 &
+          nohup "$(go env GOPATH)/bin/go-httpbin" -port 8080 -max-body-size 8388608 > httpbin.log 2>&1 &
           for i in $(seq 1 30); do curl -sf http://localhost:8080/status/200 >/dev/null && break; sleep 1; done
           curl -sf http://localhost:8080/status/200 >/dev/null || { echo "httpbin did not come up"; cat httpbin.log; exit 1; }
           echo "HTTPBIN_URL=http://localhost:8080" >> "$GITHUB_ENV"
@@ -198,7 +201,7 @@ jobs:
         shell: pwsh
         run: |
           $bin = Join-Path (go env GOPATH) 'bin\go-httpbin.exe'
-          Start-Process -FilePath $bin -ArgumentList '-port','8080' -WindowStyle Hidden
+          Start-Process -FilePath $bin -ArgumentList '-port','8080','-max-body-size','8388608' -WindowStyle Hidden
           $up = $false
           for ($i = 0; $i -lt 30 -and -not $up; $i++) {
             try { $null = Invoke-WebRequest -UseBasicParsing http://localhost:8080/status/200; $up = $true } catch { Start-Sleep -Seconds 1 }
@@ -249,7 +252,7 @@ jobs:
           # Local httpbin on a shared network so the containerised tests reach it
           # by hostname instead of depending on public services.
           docker network create testnet
-          docker run -d --name httpbin --network testnet mccutchen/go-httpbin:v2.15.0
+          docker run -d --name httpbin --network testnet -e MAX_BODY_SIZE=8388608 mccutchen/go-httpbin:v2.15.0
           for i in $(seq 1 30); do docker run --rm --network testnet curlimages/curl -sf http://httpbin:8080/status/200 >/dev/null 2>&1 && break; sleep 1; done
           docker run --rm --network testnet curlimages/curl -sf http://httpbin:8080/status/200 >/dev/null || { echo "httpbin did not come up"; docker logs httpbin; exit 1; }
           docker run --rm --platform ${{ matrix.platform }} \
@@ -358,7 +361,7 @@ jobs:
 
       - name: Start local httpbin
         run: |
-          docker run -d --name httpbin -p 8080:8080 mccutchen/go-httpbin:v2.15.0
+          docker run -d --name httpbin -p 8080:8080 -e MAX_BODY_SIZE=8388608 mccutchen/go-httpbin:v2.15.0
           for i in $(seq 1 30); do curl -sf http://localhost:8080/status/200 >/dev/null && break; sleep 1; done
           curl -sf http://localhost:8080/status/200 >/dev/null || { echo "httpbin did not come up"; docker logs httpbin; exit 1; }
           echo "HTTPBIN_URL=http://localhost:8080" >> "$GITHUB_ENV"

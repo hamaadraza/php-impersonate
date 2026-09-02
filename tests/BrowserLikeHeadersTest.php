@@ -82,8 +82,20 @@ class BrowserLikeHeadersTest extends TestCase
 
         // Over a megabyte is where curl adds Expect: 100-continue on HTTP/1.1.
         $body = str_repeat('x', 1500000);
-        $headers = TestServer::json((new PHPImpersonate('chrome146', 60, [], $engine))
-            ->send(new Request('POST', TestServer::httpbin('/post'), ['Content-Type' => 'text/plain'], $body)))['headers'] ?? [];
+        $response = (new PHPImpersonate('chrome146', 60, [], $engine))
+            ->send(new Request('POST', TestServer::httpbin('/post'), ['Content-Type' => 'text/plain'], $body));
+
+        if ($response->status() !== 200) {
+            // go-httpbin caps request bodies at 1 MiB unless started with
+            // -max-body-size (docker-compose.yml and CI do); the suppression
+            // itself is asserted offline in ProcessCommandTest either way.
+            $this->markTestSkipped(sprintf(
+                'httpbin answered %d to a 1.5 MB body; start it with MAX_BODY_SIZE=8388608 to run this test.',
+                $response->status()
+            ));
+        }
+
+        $headers = TestServer::json($response)['headers'] ?? [];
 
         $lower = array_change_key_case($headers, CASE_LOWER);
         $this->assertArrayNotHasKey('expect', $lower, "$engine sent Expect: 100-continue, which no browser does");

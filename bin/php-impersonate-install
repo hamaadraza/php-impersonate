@@ -5,10 +5,10 @@
  * Download the curl-impersonate binary (and shared library) for the CURRENT
  * platform into this package's bin/ directory.
  *
- * The package ships binaries for linux-x86_64 (glibc), linux-x86_64-musl,
- * macos-aarch64 (Apple Silicon) and windows-x86_64. On any OTHER platform —
- * Linux ARM64 (glibc or musl), or an Intel Mac — run this once after install to
- * fetch the matching artifacts:
+ * The package ships binaries for linux-x86_64 (glibc), macos-aarch64 (Apple
+ * Silicon) and windows-x86_64. On any OTHER platform — Linux musl/Alpine,
+ * Linux ARM64 (glibc or musl), or an Intel Mac — run this once after install
+ * to fetch the matching artifacts:
  *
  *   php vendor/hamaadraza/php-impersonate/bin/php-impersonate-install
  *   # or, from a clone of this package:

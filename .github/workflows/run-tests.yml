@@ -8,6 +8,10 @@ name: Tests
 #
 # `push` is restricted to main: with pull_request also enabled, every push to a
 # PR branch ran the entire matrix twice, QEMU legs included.
+#
+# Every action is pinned to a commit SHA (the tag it corresponds to is in the
+# comment) so that a moved or compromised tag cannot change what runs here.
+# Dependabot keeps the SHAs current.
 on:
   push:
     branches: [main]
@@ -23,6 +27,10 @@ on:
       - 'scripts/**'
   pull_request:
     paths: *test-paths
+
+# Least privilege: nothing here writes to the repository.
+permissions:
+  contents: read
 
 jobs:
   # ===========================================
@@ -43,10 +51,10 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       - name: Setup PHP
-        uses: shivammathur/setup-php@v2
+        uses: shivammathur/setup-php@f3e473d116dcccaddc5834248c87452386958240 # v2
         with:
           php-version: ${{ matrix.php }}
           coverage: none
@@ -61,7 +69,7 @@ jobs:
           exit $fail
 
   # ===========================================
-  # Static analysis (PHPStan)
+  # Static analysis (PHPStan) and dependency audit
   # ===========================================
   phpstan:
     runs-on: ubuntu-latest
@@ -71,33 +79,38 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       - name: Setup PHP
-        uses: shivammathur/setup-php@v2
+        uses: shivammathur/setup-php@f3e473d116dcccaddc5834248c87452386958240 # v2
         with:
           php-version: '8.3'
           coverage: none
 
       - name: Cache Composer packages
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: ~/.composer/cache/files
-          key: composer-${{ runner.os }}-${{ matrix.php || '8.3' }}-${{ hashFiles('composer.json') }}
+          key: composer-${{ runner.os }}-8.3-${{ hashFiles('composer.json') }}
           restore-keys: |
-            composer-${{ runner.os }}-${{ matrix.php || '8.3' }}-
+            composer-${{ runner.os }}-8.3-
       - name: Install dependencies
         run: composer install --prefer-dist --no-interaction
 
       - name: Run PHPStan
         run: composer analyse
 
+      # The lockfile is untracked (this is a library), so Dependabot never sees
+      # the resolved dev dependencies; audit what actually got installed.
+      - name: Audit dependencies
+        run: composer audit
+
   # ===========================================
   # Native OS Testing (x86_64 and ARM64)
   # ===========================================
   test-native:
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 15
+    timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
@@ -106,22 +119,27 @@ jobs:
           - os: ubuntu-latest
             php: '8.2'
             name: 'Linux x86_64 (PHP 8.2)'
+          # The release-guarding leg: an unreachable or rate-limited live
+          # service FAILS here instead of skipping, so a green run means the
+          # fingerprint suites actually verified something.
           - os: ubuntu-latest
             php: '8.3'
-            name: 'Linux x86_64 (PHP 8.3)'
+            name: 'Linux x86_64 (PHP 8.3, live services required)'
+            require_live: '1'
           - os: ubuntu-latest
             php: '8.4'
+            name: 'Linux x86_64 (PHP 8.4)'
           # composer.json allows ^8, so the top of that range must be tested
           # too — 8.5 is what new environments now provision.
           - os: ubuntu-latest
             php: '8.5'
-            name: 'Linux x86_64 (PHP 8.4)'
-            
+            name: 'Linux x86_64 (PHP 8.5)'
+
           # Windows x86_64
           - os: windows-latest
             php: '8.3'
             name: 'Windows x86_64 (PHP 8.3)'
-            
+
           # macOS Apple Silicon (ARM64) - Primary macOS target
           - os: macos-latest
             php: '8.3'
@@ -131,13 +149,13 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       - name: Setup PHP
-        uses: shivammathur/setup-php@v2
+        uses: shivammathur/setup-php@f3e473d116dcccaddc5834248c87452386958240 # v2
         with:
           php-version: ${{ matrix.php }}
-          extensions: dom, curl, libxml, mbstring, zip, pcntl, bcmath, soap, intl, fileinfo
+          extensions: dom, curl, libxml, mbstring, zip, pcntl, bcmath, soap, intl, fileinfo, ffi
           coverage: none
 
       - name: Setup problem matchers
@@ -146,18 +164,18 @@ jobs:
           echo "::add-matcher::${{ runner.tool_cache }}/phpunit.json"
 
       - name: Cache Composer packages
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: ~/.composer/cache/files
-          key: composer-${{ runner.os }}-${{ matrix.php || '8.3' }}-${{ hashFiles('composer.json') }}
+          key: composer-${{ runner.os }}-${{ matrix.php }}-${{ hashFiles('composer.json') }}
           restore-keys: |
-            composer-${{ runner.os }}-${{ matrix.php || '8.3' }}-
+            composer-${{ runner.os }}-${{ matrix.php }}-
       - name: Install dependencies
         run: composer install --prefer-dist --no-interaction
 
-      # The package bundles binaries for mainstream x86_64 platforms only; this
-      # fetches the matching binary + library for others (e.g. macOS ARM64) and
-      # is a no-op where they are already bundled.
+      # The package bundles binaries for mainstream platforms only; this
+      # fetches the matching binary + library for others and is a no-op where
+      # they are already bundled.
       - name: Install platform curl-impersonate binaries
         run: php bin/php-impersonate-install
 
@@ -168,6 +186,15 @@ jobs:
         shell: bash
         run: |
           php -r 'echo "OS: " . PHP_OS . PHP_EOL . "Arch: " . php_uname("m") . PHP_EOL;'
+
+      # Every FFI test skips silently when the engine is unavailable, so a
+      # green run said nothing about whether the FFI engine was exercised at
+      # all. On the platforms that ship a shared library it must be.
+      - name: Assert the FFI engine is usable
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          php -r 'require "vendor/autoload.php"; $ok = Raza\PHPImpersonate\PHPImpersonate::ffiAvailable(); echo "FFI engine available: ", var_export($ok, true), PHP_EOL; exit($ok ? 0 : 1);'
 
       # Run httpbin locally so the HTTP behaviour tests don't depend on flaky
       # public services. Linux runners have Docker; on Windows/macOS the tests
@@ -180,6 +207,8 @@ jobs:
           echo "HTTPBIN_URL=http://localhost:8080" >> "$GITHUB_ENV"
 
       - name: Execute tests
+        env:
+          REQUIRE_LIVE_SERVICES: ${{ matrix.require_live || '' }}
         run: vendor/bin/pest --ci
 
   # ===========================================
@@ -188,7 +217,7 @@ jobs:
   # ===========================================
   test-docker:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 40
     strategy:
       fail-fast: false
       matrix:
@@ -207,13 +236,13 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       - name: Set up QEMU
-        uses: docker/setup-qemu-action@v4
+        uses: docker/setup-qemu-action@1f40c72289eff860ee54a304f1438e3cff362e0a # v4
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v4
+        uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4
 
       - name: Run tests in Docker
         run: |
@@ -230,18 +259,26 @@ jobs:
             ${{ matrix.image }} \
             sh -c '
               set -e
-              
-              # Install dependencies based on distro
+
+              # Install dependencies based on distro. The official php images
+              # do not enable ext-ffi, so build it: without it every FFI test
+              # skips and these legs only ever exercised the executable engine.
               if command -v apk > /dev/null; then
-                apk add --no-cache git unzip curl tar
+                apk add --no-cache git unzip curl tar libffi-dev
+                docker-php-ext-install ffi
               else
-                apt-get update && apt-get install -y git unzip curl tar libzip-dev
-                docker-php-ext-install zip
+                apt-get update && apt-get install -y git unzip curl tar libzip-dev libffi-dev
+                docker-php-ext-install zip ffi
               fi
-              
-              # Install composer
-              curl -sS https://getcomposer.org/installer | php -- --install-dir=/usr/local/bin --filename=composer
-              
+
+              # Install composer, verifying the installer signature first.
+              EXPECTED="$(curl -sS https://composer.github.io/installer.sig)"
+              curl -sS https://getcomposer.org/installer -o composer-setup.php
+              ACTUAL="$(php -r "echo hash_file(\"sha384\", \"composer-setup.php\");")"
+              [ "$EXPECTED" = "$ACTUAL" ] || { echo "composer installer signature mismatch"; exit 1; }
+              php composer-setup.php --install-dir=/usr/local/bin --filename=composer
+              rm composer-setup.php
+
               # Install dependencies
               composer install --prefer-dist --no-interaction
 
@@ -261,7 +298,10 @@ jobs:
                 echo \"Binary Dir: \" . PlatformDetector::getBinaryDir() . PHP_EOL;
               "
               echo "===================="
-              
+
+              # The FFI engine must be usable here, or these legs test only one engine.
+              php -r "require \"vendor/autoload.php\"; \$ok = Raza\PHPImpersonate\PHPImpersonate::ffiAvailable(); echo \"FFI engine available: \", var_export(\$ok, true), PHP_EOL; exit(\$ok ? 0 : 1);"
+
               # Run tests
               vendor/bin/pest --ci
             '
@@ -281,22 +321,22 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       - name: Setup PHP
-        uses: shivammathur/setup-php@v2
+        uses: shivammathur/setup-php@f3e473d116dcccaddc5834248c87452386958240 # v2
         with:
           php-version: '8.3'
-          extensions: dom, curl, libxml, mbstring, zip, pcntl, bcmath, soap, intl, fileinfo
+          extensions: dom, curl, libxml, mbstring, zip, pcntl, bcmath, soap, intl, fileinfo, ffi
           coverage: none
 
       - name: Cache Composer packages
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: ~/.composer/cache/files
-          key: composer-${{ runner.os }}-${{ matrix.php || '8.3' }}-${{ hashFiles('composer.json') }}
+          key: composer-${{ runner.os }}-8.3-${{ hashFiles('composer.json') }}
           restore-keys: |
-            composer-${{ runner.os }}-${{ matrix.php || '8.3' }}-
+            composer-${{ runner.os }}-8.3-
       - name: Install dependencies
         run: composer update --${{ matrix.stability }} --prefer-dist --no-interaction
 

@@ -1,4 +1,13 @@
 name: dependabot-auto-merge
+
+# pull_request_target runs with a write token on the BASE branch's workflow
+# file. It never checks out or executes the pull request's code — only the
+# metadata action and `gh pr merge` run — which is what makes that safe here.
+#
+# `--auto` merges only once every REQUIRED status check passes. That is a
+# repository setting, not something a workflow can enforce: keep the "Tests"
+# workflow's jobs in the branch protection rule for `main`, or this merges a
+# dependency bump before the suite has run on it.
 on: pull_request_target
 
 permissions:
@@ -14,7 +23,7 @@ jobs:
 
       - name: Dependabot metadata
         id: metadata
-        uses: dependabot/fetch-metadata@v3.1.0
+        uses: dependabot/fetch-metadata@25dd0e34f4fe68f24cc83900b1fe3fe149efef98 # v3.1.0
         with:
           github-token: "${{ secrets.GITHUB_TOKEN }}"
 

@@ -11,13 +11,33 @@ class Response
      *                                          Multiple values are preserved (e.g. several Set-Cookie lines).
      * @param list<string> $setCookieHeaders Every Set-Cookie value received on ANY response in the
      *                                       redirect chain, in wire order (see {@see setCookieHeaders()}).
+     * @param string|null $effectiveUrl The URL the transfer ended on, after redirects
+     *                                  (see {@see effectiveUrl()}); null when unknown.
      */
     public function __construct(
         private string $body,
         private int $statusCode,
         private array $headers,
-        private array $setCookieHeaders = []
+        private array $setCookieHeaders = [],
+        private ?string $effectiveUrl = null
     ) {
+    }
+
+    /**
+     * The URL this response actually came from — the last hop of any redirect
+     * chain, or the request URL when nothing redirected.
+     *
+     * The engines follow redirects, so without this a caller cannot tell where
+     * a request ended up: which host answered, whether a login bounced to an
+     * error page, or whether a public URL was redirected somewhere internal.
+     * It is also what to check when enforcing a URL policy of your own, since
+     * the library deliberately applies none (see the README's security notes).
+     *
+     * Null only for a Response built by hand without one.
+     */
+    public function effectiveUrl(): ?string
+    {
+        return $this->effectiveUrl;
     }
 
     /**

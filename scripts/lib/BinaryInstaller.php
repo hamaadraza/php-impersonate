@@ -241,6 +241,55 @@ final class BinaryInstaller
         }
     }
 
+    /**
+     * The upstream provenance of one artifact: the sha256 of the release
+     * archive and of the raw member inside it, plus — when this host can run
+     * the same strip step the installer applies — the sha256 of that member
+     * once stripped, which is what bin/CHECKSUMS records for Linux.
+     *
+     * bin/CHECKSUMS alone is a self-attested pin over ALREADY-STRIPPED files, so
+     * nothing in it can be compared with upstream. This is what makes a bundled
+     * binary re-derivable from upstream's own release.
+     *
+     * @param array{triple: string, member: string, dest: string, executable: bool} $spec
+     * @return array{asset_sha256: string, member_sha256: string, stripped_sha256: string|null}
+     */
+    public function upstreamDigests(string $version, string $dir, array $spec, bool $lib): array
+    {
+        $asset = $lib ? $this->libAssetName($version, $spec) : $this->assetName($version, $spec);
+        $url = sprintf('https://github.com/%s/releases/download/%s/%s', self::REPO, $version, $asset);
+
+        $work = $this->makeTempDir();
+
+        try {
+            $archive = $work . '/' . $asset;
+            Http::download($url, $archive);
+            $assetHash = $this->sha256($archive);
+
+            $extractDir = $work . '/x';
+            @mkdir($extractDir);
+            $this->extract($archive, $extractDir);
+
+            $member = $lib ? $this->findRealSharedObject($extractDir, $dir) : $this->findMember($extractDir, $spec['member']);
+            if ($member === null) {
+                throw new \RuntimeException("member not found inside $asset");
+            }
+            $memberHash = $this->sha256($member);
+
+            $stripped = null;
+            if ($this->isHostPlatform($dir) && ! str_starts_with($dir, 'windows') && Http::which('strip') !== null) {
+                $copy = $work . '/stripped';
+                copy($member, $copy);
+                $this->stripSymbols($copy, $dir);
+                $stripped = $this->sha256($copy);
+            }
+
+            return ['asset_sha256' => $assetHash, 'member_sha256' => $memberHash, 'stripped_sha256' => $stripped];
+        } finally {
+            $this->rmrf($work);
+        }
+    }
+
     public function writeVersionFile(string $version): void
     {
         file_put_contents($this->binDir . '/VERSION', $version . "\n");

@@ -9,11 +9,11 @@ name: Check & fix styling
 # the fix is committed to the PR branch, where the pull_request event still
 # reports and the change is reviewed before it merges.
 #
-# It also drops a dead `ref: ${{ github.head_ref }}`: that expression is only
-# populated for pull_request events, so under the previous `on: push` trigger it
-# was always empty. And because GitHub does not evaluate `paths:` filters for
-# tag pushes, the old trigger additionally ran this on release tags, checking out
-# a detached HEAD that git-auto-commit-action cannot commit to.
+# The fixer runs from Composer's own vendor/ rather than a third-party Docker
+# image: the exact version is then whatever composer.json resolves — the same
+# one a contributor's `composer format` uses — and there is no image tag left
+# to pin or drift. (An image TAG is mutable; only a digest would have been a
+# real pin, and this needs neither.)
 on:
   pull_request:
     paths:
@@ -30,20 +30,23 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           ref: ${{ github.head_ref }}
 
-      # Pinned by digest-bearing tag rather than the floating `latest` the bare
-      # image name resolves to: an unpinned fixer can apply rules the version in
-      # composer.json ("friendsofphp/php-cs-fixer": "^3.21.1") would not, so CI
-      # and a contributor's local `composer format` disagree about the code.
-      - name: Run PHP CS Fixer
-        uses: docker://ghcr.io/php-cs-fixer/php-cs-fixer:3.94.2
+      - name: Setup PHP
+        uses: shivammathur/setup-php@f3e473d116dcccaddc5834248c87452386958240 # v2
         with:
-          args: fix --config=.php-cs-fixer.dist.php --allow-risky=yes
+          php-version: '8.3'
+          coverage: none
+
+      - name: Install dependencies
+        run: composer install --prefer-dist --no-interaction
+
+      - name: Run PHP CS Fixer
+        run: composer format
 
       - name: Commit changes
-        uses: stefanzweifel/git-auto-commit-action@v7
+        uses: stefanzweifel/git-auto-commit-action@4a55954c782fc1ea30b9056cd3e7a2b40ca8887d # v7
         with:
           commit_message: Fix styling

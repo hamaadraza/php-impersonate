@@ -27,7 +27,7 @@ echo $response->json()['tls']['ja4']; // a genuine browser fingerprint
 - [Supported platforms](#supported-platforms)
 - [Making requests](#making-requests) · [Responses](#responses) · [Headers](#working-with-headers)
 - [Browsers](#browsers) · [Curl options](#curl-options) · [Request bodies](#request-bodies) · [Timeouts](#timeouts) · [Errors](#error-handling)
-- [Keeping up to date](#keeping-up-to-date) · [Testing](#testing) · [License](#license)
+- [Security considerations](#security-considerations) · [Keeping up to date](#keeping-up-to-date) · [Testing](#testing) · [License](#license)
 
 ---
 
@@ -181,11 +181,15 @@ common platforms, so everything works with no extra steps:
 | Platform | Executable | FFI library |
 |---|:---:|:---:|
 | Linux x86_64 (glibc) | bundled | bundled |
-| Linux x86_64 (musl / Alpine) | bundled | bundled |
 | macOS ARM64 (Apple Silicon) | bundled | bundled |
-| Windows x86_64 | bundled | n/a — FFI is POSIX-only |
+| Windows x86_64 | bundled | n/a — no shared library is shipped for Windows |
+| Linux x86_64 (musl / Alpine) | on demand | on demand |
 | Linux ARM64 (glibc & musl) | on demand | on demand |
 | macOS x86_64 (Intel) | on demand | on demand |
+
+On Alpine, note that the official `php:*-alpine` images do not enable the
+`ffi` extension; add `apk add libffi-dev && docker-php-ext-install ffi` to use
+the FFI engine there, otherwise the executable engine is used.
 
 On an “on demand” platform, run the installer once after `composer require` to
 download the matching binary and library:
@@ -254,6 +258,8 @@ Every request returns a `Response`:
 | `headerAll($name)` | `string[]` | **All** values of a header (use for `Set-Cookie`) |
 | `hasHeader($name)` | `bool` | Whether a header is present (case-insensitive) |
 | `headers()` | `array<string, string[]>` | All headers as name → list of values |
+| `effectiveUrl()` | `?string` | The URL the transfer ended on, after redirects |
+| `setCookieHeaders()` | `string[]` | Every `Set-Cookie` from every hop (see [Cookies](#cookies)) |
 | `toArray()` | `array` | `['body' => …, 'statusCode' => …, 'headers' => …]` |
 | `dump()` | `string` | Human-readable summary (for logging) |
 | `debug()` | `self` | Echo `dump()` and return `$this` |
@@ -367,6 +373,25 @@ Pass any of these names as the `$browser` argument (default **`firefox147`**):
 
 The authoritative list is always `Raza\PHPImpersonate\Browser\BrowserName::getAll()`.
 
+A profile is one specific browser *release*, and releases age: anti-bot vendors
+flag versions that have been out of support for years, so a 2022 Chrome is a
+signal in itself even when its handshake is byte-perfect. The profiles of
+releases older than 2024 (`chrome99`–`chrome120`, `edge99`/`edge101`,
+`safari153`–`safari172_ios`) are marked `@deprecated` and listed in
+`BrowserName::DEPRECATED`; they still work. For a current identity that keeps
+up as profiles are added, ask for the newest of a family:
+
+```php
+use Raza\PHPImpersonate\Browser\BrowserName;
+
+BrowserName::latest('chrome');       // 'chrome150' today
+BrowserName::latest('firefox');      // 'firefox147'
+BrowserName::latest('safari_ios');   // 'safari260_ios' — a desktop family never answers with a mobile profile
+```
+
+Pin the result if the identity must stay the same across releases of this
+package.
+
 > [!NOTE]
 > `okhttp4_android` reproduces upstream's profile of the same name, and that
 > profile carries a **desktop Safari 17 `User-Agent`**, not an Android one — its
@@ -456,6 +481,36 @@ become `1`/`0` — so the two carry the same data and only the framing differs.
 Supply your own `boundary=` in the `Content-Type` to control it; otherwise one
 is generated for you. File uploads are not supported: pass a pre-encoded body
 via `Request` if you need them.
+
+## Security considerations
+
+**This library performs no SSRF filtering.** Any `http`/`https` URL is fetched:
+loopback, RFC 1918 ranges, link-local addresses, cloud metadata endpoints
+(`169.254.169.254`), decimal or hex IP spellings — and a public URL may
+redirect to any of them, since redirects are followed (to `http`/`https`
+only). That policy belongs in your application, which knows its network; what
+the library gives you to enforce it:
+
+- Validate the URL *and resolve its host yourself* before calling. A hostname
+  check alone is not enough (DNS rebinding can change the answer between your
+  check and curl's); resolving it and pinning the request to an address is
+  the only robust defence, and needs a proxy or `--resolve`-style pinning,
+  which this library does not yet expose.
+- Pass `['max-redirs' => 0]` to stop at the first response and vet each
+  `Location` yourself before following it — every hop then goes through your
+  policy.
+- Check `$response->effectiveUrl()` afterwards to see where a followed chain
+  actually ended.
+
+**Environment.** `PHP_IMPERSONATE_LIB` loads an arbitrary shared object into
+the PHP process; `CURL_CA_BUNDLE`, `SSL_CERT_FILE` and `SSL_CERT_DIR` change
+what is trusted. None of them should be settable by untrusted configuration.
+
+**FFI in web SAPIs.** Setting `ffi.enable=On` for PHP-FPM or Apache lets *any*
+PHP code in that SAPI call arbitrary C functions, not just this library. If
+that is unacceptable, leave FFI off there — the executable engine is used
+automatically — or run the library from CLI workers and queues, where FFI is
+always available.
 
 ## What is not taken from the environment
 
@@ -555,4 +610,8 @@ JA3/JA4; they skip too when it's unavailable.
 
 ## License
 
-MIT — see [LICENSE.md](LICENSE.md).
+MIT — see [LICENSE.md](LICENSE.md). The bundled `curl-impersonate` binaries
+are built from curl, BoringSSL, nghttp2, brotli, zstd and libidn2, each under
+its own licence; see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md), which
+also explains how every bundled file can be re-derived from upstream's release
+(`bin/UPSTREAM-CHECKSUMS`).

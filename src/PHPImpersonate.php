@@ -63,17 +63,27 @@ class PHPImpersonate implements ClientInterface
     private static ?string $ffiProbedLib = null;
 
     /**
-     * FFI engines shared process-wide, keyed by (library, browser, options).
-     * Sharing a handle lets keep-alive connections be reused across requests —
-     * including the throwaway instances the static helpers create, so
-     * `PHPImpersonate::get()` is as fast as a retained client — while the
-     * per-config key prevents a connection (and its TLS fingerprint) from being
-     * reused across different browsers. See {@see ffiEngine()}.
+     * FFI engines shared process-wide, keyed by (library, browser) — and
+     * deliberately NOT by the curl options. Sharing a handle lets keep-alive
+     * connections be reused across requests — including the throwaway
+     * instances the static helpers create, so `PHPImpersonate::get()` is as
+     * fast as a retained client — while the per-browser key prevents a
+     * connection (and its TLS fingerprint) from being reused across different
+     * browsers. See {@see ffiEngine()}.
+     *
+     * The options are left out of the key because libcurl already isolates
+     * what they affect: its connection cache only reuses a connection whose
+     * proxy, TLS verification and CA settings match, and every option is
+     * re-applied to the handle on every request after curl_easy_reset(). With
+     * options in the key, the ordinary scraping pattern — a different proxy
+     * per request — minted a new key per request, thrashed the LRU below, paid
+     * FFI::cdef() plus curl_easy_init() on every miss, and never reused a
+     * connection at all.
      *
      * Bounded to {@see MAX_FFI_ENGINES} entries (least recently used evicted
-     * first): each entry pins a curl handle plus its kept-alive connections, and
-     * callers can mint unlimited distinct keys (e.g. a new proxy per request),
-     * which in a long-running worker would otherwise grow without limit.
+     * first): each entry pins a curl handle plus its kept-alive connections,
+     * and 39 browsers is more than the bound, so a worker that rotates across
+     * every profile would otherwise grow without limit.
      *
      * NOT REENTRANT. Sharing an engine means sharing one curl easy handle, which
      * is correct under ordinary sequential PHP but assumes one request is in
@@ -113,8 +123,7 @@ class PHPImpersonate implements ClientInterface
         $this->validateTimeout($timeout);
         $this->validatePlatform();
         CurlOptions::assertAllowed($curlOptions);
-        // Canonicalise once: both engines apply the result, and the FFI cache
-        // key below is built from it, so equivalent configs share one engine.
+        // Canonicalise once, so both engines apply exactly the same value shape.
         $this->curlOptions = CurlOptions::normalize($curlOptions);
         $this->engine = $this->resolveEngine($engine);
         $this->initializeBrowser($browser, $engine);
@@ -379,7 +388,7 @@ class PHPImpersonate implements ClientInterface
     /**
      * Build a Response from an engine's raw result (shared by both engines).
      *
-     * @param array{status: int, headers: string, body: string} $result
+     * @param array{status: int, headers: string, body: string, url: string} $result
      */
     private function buildResponse(Request $request, array $result): Response
     {
@@ -389,24 +398,22 @@ class PHPImpersonate implements ClientInterface
             $isHead ? '' : $result['body'],
             $result['status'],
             ResponseHeaderParser::parse($result['headers']),
-            ResponseHeaderParser::setCookieHeaders($result['headers'])
+            ResponseHeaderParser::setCookieHeaders($result['headers']),
+            $result['url'] !== '' ? $result['url'] : $request->getUrl()
         );
     }
 
     /**
-     * The process-wide FFI engine for this client's exact configuration.
+     * The process-wide FFI engine for this client's browser.
      *
-     * Engines are keyed by (library, browser, options), NOT just the library:
-     * curl reuses keep-alive connections whose TLS config it considers a match,
-     * but that check does not cover the full impersonation profile — so reusing
+     * Engines are keyed by (library, browser), NOT just the library: curl
+     * reuses keep-alive connections whose TLS config it considers a match, but
+     * that check does not cover the full impersonation profile — so reusing
      * one connection across two browsers would send the first browser's
-     * fingerprint for the second, silently defeating impersonation. Isolating by
-     * config keeps same-config requests fast (connection reuse) while never
-     * leaking a fingerprint between browsers.
-     *
-     * The options were canonicalised — values and key order — by
-     * {@see CurlOptions::normalize()}, so two spellings of one configuration
-     * share an engine rather than minting two.
+     * fingerprint for the second, silently defeating impersonation. Isolating
+     * by browser keeps same-browser requests fast (connection reuse) while
+     * never leaking a fingerprint between browsers. Options are applied per
+     * request and need no isolation of their own; see {@see $ffiEngines}.
      */
     private function ffiEngine(): CurlImpersonate
     {
@@ -415,7 +422,7 @@ class PHPImpersonate implements ClientInterface
             throw new RequestException('libcurl-impersonate shared library not found.');
         }
 
-        $key = $lib . "\0" . $this->browserName . "\0" . serialize($this->curlOptions);
+        $key = $lib . "\0" . $this->browserName;
 
         if (isset(self::$ffiEngines[$key])) {
             // LRU touch: re-append so the least recently used entry evicts first.
@@ -568,18 +575,25 @@ class PHPImpersonate implements ClientInterface
 
         $this->browserName = $browser;
 
-        if ($this->engine === self::ENGINE_PROCESS) {
-            try {
-                $this->browser = new Browser($browser);
-            } catch (RuntimeException $e) {
-                throw new RequestException("Invalid browser: " . $e->getMessage(), 0, $e);
-            }
-        } elseif (! BrowserConfig::hasConfig($browser)) {
+        // The name is checked here, for both engines, so that the one other
+        // thing Browser can fail on — locating a usable binary — reaches the
+        // caller as what it is. It used to arrive as "Invalid browser: curl-
+        // impersonate binary not found…", which sent people checking a name
+        // that was fine.
+        if (! BrowserConfig::hasConfig($browser)) {
             throw new RequestException(sprintf(
                 "Invalid browser: '%s' is not a supported browser. Available: %s",
                 $browser,
                 implode(', ', BrowserConfig::getAvailableBrowsers())
             ));
+        }
+
+        if ($this->engine === self::ENGINE_PROCESS) {
+            try {
+                $this->browser = new Browser($browser);
+            } catch (RuntimeException $e) {
+                throw new RequestException($e->getMessage(), 0, $e);
+            }
         }
     }
 

@@ -72,7 +72,7 @@ final class CurlProcess
      * Perform one request. Inputs are assumed already validated/normalised.
      *
      * @param array<string,string> $headers
-     * @return array{status: int, headers: string, body: string} Raw header block + body.
+     * @return array{status: int, headers: string, body: string, url: string} Raw header block + body + effective URL.
      */
     public function request(string $method, string $url, array $headers, ?string $body): array
     {
@@ -115,7 +115,12 @@ final class CurlProcess
                 $statusCode = $fromHeaders !== null ? (int) $fromHeaders : $statusCode;
             }
 
-            return ['status' => $statusCode, 'headers' => $rawHeaders, 'body' => $responseBody];
+            return [
+                'status' => $statusCode,
+                'headers' => $rawHeaders,
+                'body' => $responseBody,
+                'url' => $result['url'] !== '' ? $result['url'] : $url,
+            ];
         } finally {
             $this->cleanupTempFiles($tempFiles);
             if (isset($additionalTempFiles)) {
@@ -489,11 +494,15 @@ final class CurlProcess
     private function writeLinesToTempFile(string $prefix, array $lines, string $what): string
     {
         $file = $this->createTempFile($prefix);
+        $content = implode("\n", $lines) . "\n";
 
-        if (file_put_contents($file, implode("\n", $lines) . "\n") === false) {
+        // A SHORT write is a failure too. On a full disk file_put_contents()
+        // returns the bytes it managed, not false, and a truncated header or
+        // config file would be handed to curl as if it were whole.
+        if (file_put_contents($file, $content) !== strlen($content)) {
             $this->deleteTempFile($file);
 
-            throw new RequestException("Failed to write $what to a temporary file");
+            throw new RequestException("Failed to write $what to a temporary file (disk full?)");
         }
 
         return $file;
@@ -544,7 +553,10 @@ final class CurlProcess
             // string is curl's documented spelling for "engine on, no file";
             // nothing is written to disk and nothing outlives the process.
             'b' => '',
-            'w' => '%{http_code}', // write out format
+            // Write-out: the URL the transfer ended on, then the status code —
+            // status LAST, because processCommandOutput() reads the final line
+            // as the status and the line before it as the effective URL.
+            'w' => "%{url_effective}\n%{http_code}",
             'max-time' => $this->timeout,
             // A cap on the body, because it is buffered whole (see
             // CurlOptions::DEFAULT_MAX_FILESIZE). A caller's own max-filesize
@@ -615,10 +627,12 @@ final class CurlProcess
         // Temp file avoids command-line length limits and escapeshellarg issues.
         $bodyFile = $this->createTempFile('curl_body_data');
 
-        if (file_put_contents($bodyFile, $body) === false) {
+        // Compared against the length, not just false: a full disk yields a
+        // partial write, and a truncated body must not go out as the request.
+        if (file_put_contents($bodyFile, $body) !== strlen($body)) {
             $this->deleteTempFile($bodyFile);
 
-            throw new RequestException('Failed to write request body to temporary file');
+            throw new RequestException('Failed to write request body to temporary file (disk full?)');
         }
 
         // Always --data-binary: plain --data strips CRs and stops at NUL bytes,
@@ -669,7 +683,7 @@ final class CurlProcess
      *
      * @param list<string> $command argv array (executable first); proc_open array
      *                              mode runs it directly without any shell.
-     * @return array{status_code: string, stdout: array<int,string>, output: array<int,string>}
+     * @return array{status_code: string, url: string, stdout: array<int,string>, output: array<int,string>}
      */
     private function runCommand(array $command): array
     {
@@ -682,6 +696,18 @@ final class CurlProcess
         ];
 
         $displayCommand = self::redactCommand($command);
+
+        // Since PHP 8.0 a name in disable_functions behaves as undefined, so an
+        // unguarded call dies with a bare \Error that escapes every exception
+        // this library documents. proc_open is among the first things a
+        // hardened host disables, so say what is wrong and what to do.
+        if (! function_exists('proc_open')) {
+            throw new RequestException(
+                'The executable engine needs proc_open(), which this host disables '
+                . '(see the disable_functions ini setting). Enable it, or use the FFI '
+                . "engine (engine: '" . \Raza\PHPImpersonate\PHPImpersonate::ENGINE_FFI . "'), which spawns no process."
+            );
+        }
 
         $process = proc_open($command, $descriptorspec, $pipes);
 
@@ -699,7 +725,7 @@ final class CurlProcess
     /**
      * @param resource $process
      * @param array<int,resource> $pipes
-     * @return array{status_code: string, stdout: array<int,string>, output: array<int,string>}
+     * @return array{status_code: string, url: string, stdout: array<int,string>, output: array<int,string>}
      */
     private function handleProcess($process, array $pipes, int $timeout, string $command): array
     {
@@ -839,7 +865,7 @@ final class CurlProcess
     }
 
     /**
-     * @return array{status_code: string, stdout: array<int,string>, output: array<int,string>}
+     * @return array{status_code: string, url: string, stdout: array<int,string>, output: array<int,string>}
      */
     private function processCommandOutput(
         string $output,
@@ -861,6 +887,13 @@ final class CurlProcess
 
         $lastLine = $outputLines === [] ? '' : trim((string) end($outputLines));
         $statusCode = is_numeric($lastLine) ? $lastLine : '0';
+
+        // The write-out is `url_effective` then `http_code`, so the effective
+        // URL is the line before the status. Absent (a transfer that never
+        // produced a write-out) it is simply empty and the caller falls back to
+        // the request URL.
+        $count = count($outputLines);
+        $effectiveUrl = $count >= 2 ? trim((string) $outputLines[$count - 2]) : '';
 
         // $statusCode is always a numeric string here; only the range needs checking.
         $hasValidStatusCode = (int) $statusCode >= 100 && (int) $statusCode < 600;
@@ -901,6 +934,7 @@ final class CurlProcess
 
         return [
             'status_code' => $statusCode,
+            'url' => $effectiveUrl,
             // stdout only: safe to mine for response content
             'stdout' => $outputLines,
             // stdout + stderr: for diagnostics, never for response bodies

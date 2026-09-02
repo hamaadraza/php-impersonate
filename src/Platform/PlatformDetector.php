@@ -88,7 +88,24 @@ class PlatformDetector
             return self::LIBC_MUSL;
         }
 
-        // Method 2: Check ldd --version output.
+        // Method 2: the dynamic loader itself, which needs no subprocess. This
+        // runs once per PHP process — and under PHP-FPM that is once per web
+        // request, where the `ldd` probe below cost a shell plus a process on
+        // every request that reached this library, for both engines. The
+        // loader path is the definitive answer on every mainstream distro, so
+        // `ldd` is only a last resort for an unfamiliar layout.
+        foreach (['/lib/ld-musl-x86_64.so.1', '/lib/ld-musl-aarch64.so.1'] as $muslLoader) {
+            if (file_exists($muslLoader)) {
+                return self::LIBC_MUSL;
+            }
+        }
+        foreach (['/lib64/ld-linux-x86-64.so.2', '/lib/ld-linux-aarch64.so.1', '/lib/x86_64-linux-gnu/ld-linux-x86-64.so.2'] as $gnuLoader) {
+            if (file_exists($gnuLoader)) {
+                return self::LIBC_GNU;
+            }
+        }
+
+        // Method 3: Check ldd --version output.
         // shell_exec() returns string|false|null — false when the process could
         // not be spawned at all. The null check alone let `false` through to
         // stripos(), where it silently coerced to '' and every probe below
@@ -108,11 +125,6 @@ class PlatformDetector
             if (stripos($lddOutput, 'GLIBC') !== false || stripos($lddOutput, 'GNU libc') !== false) {
                 return self::LIBC_GNU;
             }
-        }
-
-        // Method 3: Check if musl-libc is present
-        if (file_exists('/lib/ld-musl-x86_64.so.1') || file_exists('/lib/ld-musl-aarch64.so.1')) {
-            return self::LIBC_MUSL;
         }
 
         // Default to GNU libc

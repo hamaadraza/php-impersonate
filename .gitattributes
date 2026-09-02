@@ -29,3 +29,4 @@
 /scripts/lib/ConfigGenerator.php export-ignore
 /scripts/lib/SourceEditor.php export-ignore
 /scripts/lib/UpstreamPatch.php export-ignore
+/scripts/record-upstream-checksums.php export-ignore

@@ -61,7 +61,6 @@ class ProcessImpersonateTest extends TestCase
         $engine = new CurlProcess($browser, 30, []);
 
         $method = (new ReflectionClass(CurlProcess::class))->getMethod('buildCommand');
-        $method->setAccessible(true);
 
         /** @var array{command: list<string>, tempFiles: array<int,string>} $result */
         $result = $method->invoke($engine, 'GET', 'https://example.com/', '/tmp/b', '/tmp/h', $headers, null);
@@ -219,7 +218,6 @@ class ProcessImpersonateTest extends TestCase
         $engine = new CurlProcess($this->browser('chrome146', BrowserConfig::getConfig('chrome146')), 30, ['max-filesize' => 4096]);
 
         $method = (new ReflectionClass(CurlProcess::class))->getMethod('buildCommand');
-        $method->setAccessible(true);
 
         /** @var array{command: list<string>, tempFiles: array<int,string>} $result */
         $result = $method->invoke($engine, 'GET', 'https://example.com/', '/tmp/b', '/tmp/h', [], null);

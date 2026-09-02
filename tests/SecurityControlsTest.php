@@ -38,7 +38,6 @@ class SecurityControlsTest extends TestCase
     public function testCommandRedaction(array $argv, string $expected): void
     {
         $redact = (new ReflectionClass(CurlProcess::class))->getMethod('redactCommand');
-        $redact->setAccessible(true);
 
         $this->assertSame($expected, $redact->invoke(null, $argv));
     }
@@ -105,7 +104,6 @@ class SecurityControlsTest extends TestCase
             Configuration::setPlatformConfig($platform, ['which_command' => $configured]);
 
             $find = (new ReflectionClass(Browser::class))->getMethod('findInPath');
-            $find->setAccessible(true);
 
             // A rejected value falls back to which/where, so the lookup simply
             // finds nothing for a name that does not exist — the point is that
@@ -166,7 +164,6 @@ class SecurityControlsTest extends TestCase
         }
 
         $findInPath = new ReflectionMethod(Browser::class, 'findInPath');
-        $findInPath->setAccessible(true);
 
         $browser = (new ReflectionClass(Browser::class))->newInstanceWithoutConstructor();
         $platform = PlatformDetector::getPlatform();

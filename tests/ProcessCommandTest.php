@@ -72,7 +72,6 @@ class ProcessCommandTest extends TestCase
         $engine = new CurlProcess($this->browser($profileHeaders), 30, $curlOptions);
 
         $build = (new ReflectionClass(CurlProcess::class))->getMethod('buildCommand');
-        $build->setAccessible(true);
 
         /** @var array{command: list<string>, tempFiles: array<int,string>} $result */
         $result = $build->invoke(
@@ -417,7 +416,6 @@ class ProcessCommandTest extends TestCase
         $engine = new CurlProcess($this->browser([]), 30, []);
 
         $build = (new ReflectionClass(CurlProcess::class))->getMethod('buildCommand');
-        $build->setAccessible(true);
 
         try {
             $build->invoke($engine, 'GET', 'https://example.com/', '/tmp/b', '/tmp/h', ['X-Bad' => "value\r\nInjected: 1"], null);
@@ -432,7 +430,6 @@ class ProcessCommandTest extends TestCase
         // invariant is that headers are validated before a file is ever
         // created, so nothing was tracked and nothing needs cleaning up.
         $tracked = (new ReflectionClass(CurlProcess::class))->getProperty('tempFiles');
-        $tracked->setAccessible(true);
 
         $this->assertSame([], $tracked->getValue($engine), 'a rejected request must not leave a temp file behind');
     }
@@ -549,7 +546,6 @@ class ProcessCommandTest extends TestCase
         $engine = new CurlProcess($this->browser([]), 5, []);
 
         $method = (new ReflectionClass(CurlProcess::class))->getMethod('processCommandOutput');
-        $method->setAccessible(true);
 
         if ($shouldThrow) {
             $this->expectException(RequestException::class);

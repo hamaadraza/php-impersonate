@@ -161,15 +161,50 @@ jobs:
         run: |
           php -r 'require "vendor/autoload.php"; $ok = Raza\PHPImpersonate\PHPImpersonate::ffiAvailable(); echo "FFI engine available: ", var_export($ok, true), PHP_EOL; exit($ok ? 0 : 1);'
 
-      # Run httpbin locally so the HTTP behaviour tests don't depend on flaky
-      # public services. Linux runners have Docker; on Windows/macOS the tests
-      # fall back to the public service and skip gracefully if it is unreachable.
-      - name: Start local httpbin (Linux)
+      # Run httpbin locally on EVERY leg so the HTTP behaviour tests never
+      # depend on the public service (which answers 5xx under load — a 502 on
+      # /cookies/set failed the macOS leg). go-httpbin listens on 8080 inside
+      # its container: the old `-p 8080:80` mapping pointed at nothing, so the
+      # service was never reachable in CI and every live test silently skipped
+      # — which the FFI/live-services assertions below now turn into failures.
+      # A readiness check that cannot pass fails the job instead of moving on.
+      - name: Start local httpbin (Linux, Docker)
         if: runner.os == 'Linux'
         run: |
-          docker run -d --name httpbin -p 8080:80 mccutchen/go-httpbin:v2.15.0
-          for i in $(seq 1 30); do curl -sf http://localhost:8080/status/200 >/dev/null && break || sleep 1; done
+          docker run -d --name httpbin -p 8080:8080 mccutchen/go-httpbin:v2.15.0
+          for i in $(seq 1 30); do curl -sf http://localhost:8080/status/200 >/dev/null && break; sleep 1; done
+          curl -sf http://localhost:8080/status/200 >/dev/null || { echo "httpbin did not come up"; docker logs httpbin; exit 1; }
           echo "HTTPBIN_URL=http://localhost:8080" >> "$GITHUB_ENV"
+
+      # No Docker on the macOS and Windows runners, and go-httpbin publishes no
+      # prebuilt binaries — but every runner image ships Go, and the server is
+      # a single `go install` away.
+      - name: Build local httpbin (macOS/Windows)
+        if: runner.os != 'Linux'
+        shell: bash
+        run: go install github.com/mccutchen/go-httpbin/v2/cmd/go-httpbin@v2.15.0
+
+      - name: Start local httpbin (macOS)
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          nohup "$(go env GOPATH)/bin/go-httpbin" -port 8080 > httpbin.log 2>&1 &
+          for i in $(seq 1 30); do curl -sf http://localhost:8080/status/200 >/dev/null && break; sleep 1; done
+          curl -sf http://localhost:8080/status/200 >/dev/null || { echo "httpbin did not come up"; cat httpbin.log; exit 1; }
+          echo "HTTPBIN_URL=http://localhost:8080" >> "$GITHUB_ENV"
+
+      - name: Start local httpbin (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $bin = Join-Path (go env GOPATH) 'bin\go-httpbin.exe'
+          Start-Process -FilePath $bin -ArgumentList '-port','8080' -WindowStyle Hidden
+          $up = $false
+          for ($i = 0; $i -lt 30 -and -not $up; $i++) {
+            try { $null = Invoke-WebRequest -UseBasicParsing http://localhost:8080/status/200; $up = $true } catch { Start-Sleep -Seconds 1 }
+          }
+          if (-not $up) { Write-Error 'httpbin did not come up'; exit 1 }
+          Add-Content -Path $env:GITHUB_ENV -Value 'HTTPBIN_URL=http://localhost:8080'
 
       - name: Execute tests
         env:
@@ -215,10 +250,11 @@ jobs:
           # by hostname instead of depending on public services.
           docker network create testnet
           docker run -d --name httpbin --network testnet mccutchen/go-httpbin:v2.15.0
-          for i in $(seq 1 30); do docker run --rm --network testnet curlimages/curl -sf http://httpbin:80/status/200 >/dev/null 2>&1 && break || sleep 1; done
+          for i in $(seq 1 30); do docker run --rm --network testnet curlimages/curl -sf http://httpbin:8080/status/200 >/dev/null 2>&1 && break; sleep 1; done
+          docker run --rm --network testnet curlimages/curl -sf http://httpbin:8080/status/200 >/dev/null || { echo "httpbin did not come up"; docker logs httpbin; exit 1; }
           docker run --rm --platform ${{ matrix.platform }} \
             --network testnet \
-            -e HTTPBIN_URL=http://httpbin:80 \
+            -e HTTPBIN_URL=http://httpbin:8080 \
             -v "${{ github.workspace }}:/app" \
             -w /app \
             ${{ matrix.image }} \
@@ -229,8 +265,14 @@ jobs:
               # do not enable ext-ffi, so build it: without it every FFI test
               # skips and these legs only ever exercised the executable engine.
               if command -v apk > /dev/null; then
-                apk add --no-cache git unzip curl tar libffi-dev
+                # The Alpine image deletes its compiler after building PHP
+                # (`apk del .build-deps` in the official Dockerfile), so the
+                # toolchain has to come back for docker-php-ext-install, and
+                # go again once ext-ffi is built; libffi itself stays.
+                apk add --no-cache git unzip curl tar libffi
+                apk add --no-cache --virtual .build-deps $PHPIZE_DEPS libffi-dev
                 docker-php-ext-install ffi
+                apk del --no-network .build-deps
               else
                 apt-get update && apt-get install -y git unzip curl tar libzip-dev libffi-dev
                 docker-php-ext-install zip ffi
@@ -310,8 +352,9 @@ jobs:
 
       - name: Start local httpbin
         run: |
-          docker run -d --name httpbin -p 8080:80 mccutchen/go-httpbin:v2.15.0
-          for i in $(seq 1 30); do curl -sf http://localhost:8080/status/200 >/dev/null && break || sleep 1; done
+          docker run -d --name httpbin -p 8080:8080 mccutchen/go-httpbin:v2.15.0
+          for i in $(seq 1 30); do curl -sf http://localhost:8080/status/200 >/dev/null && break; sleep 1; done
+          curl -sf http://localhost:8080/status/200 >/dev/null || { echo "httpbin did not come up"; docker logs httpbin; exit 1; }
           echo "HTTPBIN_URL=http://localhost:8080" >> "$GITHUB_ENV"
 
       - name: Execute tests

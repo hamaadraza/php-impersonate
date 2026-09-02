@@ -69,7 +69,6 @@ class BrowserResolutionTest extends TestCase
     private function invoke(string $method, mixed ...$args): mixed
     {
         $m = new ReflectionMethod(Browser::class, $method);
-        $m->setAccessible(true);
 
         return $m->invoke($this->browser(), ...$args);
     }
@@ -87,7 +86,6 @@ class BrowserResolutionTest extends TestCase
 
         // Nothing was verified by execution: the per-process cache is untouched.
         $verified = (new ReflectionClass(Browser::class))->getProperty('verifiedBinaries');
-        $verified->setAccessible(true);
         $this->assertArrayNotHasKey($browser->getExecutablePath(), $verified->getValue());
     }
 

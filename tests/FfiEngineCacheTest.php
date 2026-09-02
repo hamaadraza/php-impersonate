@@ -125,7 +125,6 @@ class FfiEngineCacheTest extends TestCase
         $client = new PHPImpersonate($browser, 30, $curlOptions, PHPImpersonate::ENGINE_FFI);
 
         $method = (new ReflectionClass(PHPImpersonate::class))->getMethod('ffiEngine');
-        $method->setAccessible(true);
 
         return $method->invoke($client);
     }
@@ -136,7 +135,6 @@ class FfiEngineCacheTest extends TestCase
     private function cachedEngines(): array
     {
         $property = (new ReflectionClass(PHPImpersonate::class))->getProperty('ffiEngines');
-        $property->setAccessible(true);
 
         return $property->getValue();
     }

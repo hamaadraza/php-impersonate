@@ -101,11 +101,17 @@ class FfiForeignLibcurlTest extends TestCase
     }
 
     /**
+     * Run a command to completion and return [exit code, combined output].
+     *
+     * Not named run(): PHPUnit\Framework\TestCase::run() is the runner's own
+     * entry point, and a helper by that name re-executed this very test from
+     * inside itself, forever.
+     *
      * @return array{0: int, 1: string}
      */
-    private function execute(array $argv, array $env = []): array
+    private function spawnChild(array $argv, array $env = []): array
     {
-        $p = proc_open($argv, [1 => ['pipe', 'w'], 2 => ['pipe', 'w']], $pipes, null, $env + ['PATH' => (string) getenv('PATH')]);
+        $p = proc_open($argv, [0 => ['file', '/dev/null', 'r'], 1 => ['pipe', 'w'], 2 => ['pipe', 'w']], $pipes, null, $env + ['PATH' => (string) getenv('PATH')]);
         $out = (string) stream_get_contents($pipes[1]) . (string) stream_get_contents($pipes[2]);
         fclose($pipes[1]);
         fclose($pipes[2]);
@@ -143,11 +149,11 @@ class FfiForeignLibcurlTest extends TestCase
             }
             C, '-ldl -rdynamic');
 
-        [$code, $plain] = $this->execute([$host, $lib]);
+        [$code, $plain] = $this->spawnChild([$host, $lib]);
         $this->assertSame(0, $code, $plain);
         $this->assertStringContainsString('rc=48', $plain, 'the fixture must reproduce the capture; without it this test proves nothing');
 
-        [$code, $deep] = $this->execute([$host, $lib, 'deepbind']);
+        [$code, $deep] = $this->spawnChild([$host, $lib, 'deepbind']);
         $this->assertSame(0, $code, $deep);
         $this->assertStringContainsString('rc=0', $deep, 'RTLD_DEEPBIND must let the library bind to its own curl_easy_setopt');
     }
@@ -179,7 +185,7 @@ class FfiForeignLibcurlTest extends TestCase
             . ' $c = new Raza\PHPImpersonate\PHPImpersonate("chrome146", 5);'
             . ' echo "engine=", $c->engine(), "\n";';
 
-        [$code, $out] = $this->run(
+        [$code, $out] = $this->spawnChild(
             [PHP_BINARY, '-d', 'ffi.enable=1', '-r', $script],
             [LibResolver::ENV_VAR => $fake]
         );

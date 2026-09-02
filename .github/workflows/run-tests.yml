@@ -224,6 +224,11 @@ jobs:
           if (-not $up) { Write-Error 'httpbin did not come up'; exit 1 }
           Add-Content -Path $env:GITHUB_ENV -Value 'HTTPBIN_URL=http://localhost:8080'
 
+      # The FFI symbol-interposition tests build small C fixtures with gcc.
+      - name: Opt in to the C-fixture tests
+        if: runner.os == 'Linux'
+        run: echo "PHP_IMPERSONATE_BUILD_FIXTURES=1" >> "$GITHUB_ENV"
+
       - name: Execute tests
         env:
           REQUIRE_LIVE_SERVICES: ${{ matrix.require_live || '' }}

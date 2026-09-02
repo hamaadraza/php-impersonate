@@ -9,6 +9,7 @@ use Raza\PHPImpersonate\Process\CurlProcess;
 use PHPUnit\Framework\Attributes\DataProvider;
 use Raza\PHPImpersonate\Support\RequestPreparer;
 use Raza\PHPImpersonate\Browser\BrowserInterface;
+use Raza\PHPImpersonate\Exception\RequestException;
 
 /**
  * Offline checks on the argv the executable engine actually builds.
@@ -494,5 +495,51 @@ class ProcessCommandTest extends TestCase
         // -X HEAD makes curl wait for a body the server never sends.
         $this->assertContains('--head', $argv);
         $this->assertNotContains('-X', $argv);
+    }
+
+    // -------------------------------------------------------------------------
+    // Exit-code handling
+    // -------------------------------------------------------------------------
+
+    /**
+     * @return array<string, array{0: int, 1: string, 2: bool}>
+     */
+    public static function exitCodeProvider(): array
+    {
+        return [
+            // [exit code, stdout write-out, should it throw]
+            'clean success' => [0, '200', false],
+            'redirect cap is excused, as on FFI' => [47, '302', false],
+            'partial file must not pass as a 200' => [18, '200', true],
+            'mid-body timeout must not pass' => [28, '200', true],
+            'receive error must not pass' => [56, '200', true],
+            'transport failure with no status' => [6, '000', true],
+            // proc_get_status() reaps the child, so proc_close() answers -1 on
+            // PHP 8.2 for a run that plainly succeeded. An indeterminate code is
+            // not a failure, and inventing one broke every request on that
+            // version the moment the engine started taking exit codes seriously.
+            'indeterminate code with a status is not a failure' => [-1, '200', false],
+            'indeterminate code with no status IS a failure' => [-1, '000', true],
+        ];
+    }
+
+    #[DataProvider('exitCodeProvider')]
+    public function testExitCodeDecidesFailureIndependentlyOfTheStatusLine(
+        int $exitCode,
+        string $writeOut,
+        bool $shouldThrow
+    ): void {
+        $engine = new CurlProcess($this->browser([]), 5, []);
+
+        $method = (new ReflectionClass(CurlProcess::class))->getMethod('processCommandOutput');
+        $method->setAccessible(true);
+
+        if ($shouldThrow) {
+            $this->expectException(RequestException::class);
+        }
+
+        $result = $method->invoke($engine, $writeOut, '', $exitCode, 'curl');
+
+        $this->assertSame($writeOut, $result['status_code']);
     }
 }

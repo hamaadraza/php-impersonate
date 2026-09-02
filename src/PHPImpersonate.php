@@ -428,7 +428,38 @@ class PHPImpersonate implements ClientInterface
             unset(self::$ffiEngines[array_key_first(self::$ffiEngines)]);
         }
 
+        self::registerShutdownRelease();
+
         return self::$ffiEngines[$key] = new CurlImpersonate($lib);
+    }
+
+    /** Whether the shutdown hook below has been installed. */
+    private static bool $shutdownRegistered = false;
+
+    /**
+     * Release the cached engines deterministically, before PHP tears the object
+     * graph down on its own.
+     *
+     * Each engine owns a curl handle AND the FFI instance the handle must be
+     * freed through. At shutdown PHP destroys statics in no guaranteed order,
+     * so the FFI object can go first, leaving ~CurlImpersonate() to call
+     * curl_easy_cleanup() through a scope that no longer exists — the classic
+     * way an FFI extension segfaults on exit, after every test has already
+     * passed. Running the release from a shutdown function removes the ordering
+     * question entirely: it fires while both are still alive.
+     *
+     * Engines are recreated lazily, so this costs nothing if PHP keeps running.
+     */
+    private static function registerShutdownRelease(): void
+    {
+        if (self::$shutdownRegistered) {
+            return;
+        }
+
+        self::$shutdownRegistered = true;
+        register_shutdown_function(static function (): void {
+            self::closeFfiEngines();
+        });
     }
 
     /**

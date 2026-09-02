@@ -667,10 +667,20 @@ final class CurlProcess
         $output = '';
         $errors = '';
 
+        // proc_get_status() REAPS the child the moment it first reports the
+        // process is no longer running, which leaves the proc_close() below
+        // with nothing to wait for: on PHP 8.2 it then answers -1 for a
+        // perfectly successful run (8.3 and 8.4 cache the code and return it).
+        // So the status read AT THE TRANSITION is the authoritative exit code,
+        // and proc_close()'s return is only a fallback. -1 means "not reported".
+        $reapedExitCode = -1;
+
         while (true) {
             $status = proc_get_status($process);
 
             if (! $status['running']) {
+                $reapedExitCode = $status['exitcode'];
+
                 break;
             }
 
@@ -721,7 +731,10 @@ final class CurlProcess
             $errors .= $tailErr;
         }
 
-        $exitCode = proc_close($process);
+        $closedExitCode = proc_close($process);
+
+        // Prefer whichever actually reported a code; see $reapedExitCode above.
+        $exitCode = $reapedExitCode >= 0 ? $reapedExitCode : $closedExitCode;
 
         return $this->processCommandOutput($output, $errors, $exitCode, $command);
     }
@@ -804,6 +817,9 @@ final class CurlProcess
         $lastLine = $outputLines === [] ? '' : trim((string) end($outputLines));
         $statusCode = is_numeric($lastLine) ? $lastLine : '0';
 
+        // $statusCode is always a numeric string here; only the range needs checking.
+        $hasValidStatusCode = (int) $statusCode >= 100 && (int) $statusCode < 600;
+
         // Any failed transfer is an error, with the single carve-out the FFI
         // engine makes (see CurlImpersonate::request()), so both engines answer
         // one identical network event the same way.
@@ -815,7 +831,17 @@ final class CurlProcess
         // error (56) or an HTTP/2 stream error (92) therefore came back as an
         // ordinary 200 carrying a silently truncated body — which a caller
         // persists as real data, while the FFI engine threw for the same bytes.
-        if ($exitCode !== 0 && $exitCode !== self::CURL_EXIT_TOO_MANY_REDIRECTS) {
+        //
+        // A NEGATIVE code is a different thing from a non-zero one: it means the
+        // platform could not tell us how the process ended, not that anything
+        // went wrong. Only the status code can decide there — and reporting a
+        // request that plainly returned 200 as a failure is the one answer
+        // certain to be wrong.
+        $failed = $exitCode < 0
+            ? ! $hasValidStatusCode
+            : ($exitCode !== 0 && $exitCode !== self::CURL_EXIT_TOO_MANY_REDIRECTS);
+
+        if ($failed) {
             $allOutput = array_merge($outputLines, $errorLines);
             $errorMessage = implode("\n", $allOutput);
 

@@ -26,9 +26,44 @@ class EngineParityTest extends TestCase
     }
 
     /**
+     * Every browser whose HTTP-level parity is compared.
+     *
      * @return array<string, array{0: string}>
      */
     public static function browserProvider(): array
+    {
+        return self::ja4BrowserProvider() + [
+            // Profiles flagged during review as possibly incoherent. Whether
+            // their DATA is right is an upstream question — BrowserConfig is
+            // generated from upstream's curl.patch — but whether this package
+            // still matches the shared library is testable here, and that is
+            // what would catch a sync going wrong.
+            //
+            // HEADER parity only; see ja4BrowserProvider() for why their TLS
+            // fingerprints cannot be compared reliably.
+            'safari260_ios (v26 cipher order)' => ['safari260_ios'],
+            'chrome131_android (client hints)' => ['chrome131_android'],
+        ];
+    }
+
+    /**
+     * The subset whose JA4 can be compared deterministically.
+     *
+     * chrome131_android is deliberately absent. Its ClientHello sits on the
+     * boundary where BoringSSL applies the RFC 7685 padding extension — which
+     * it adds only when the hello lands in the 256–511 byte range — so padding
+     * appears in one handshake and not the next, moving the JA4 extension count
+     * between 17 and 16 for reasons that have nothing to do with either engine.
+     * Measured directly: the two engines' cipher hashes stayed identical while
+     * the extension sets differed by exactly `padding (21)`.
+     *
+     * Asserting on that would be a test that fails a few times a day and means
+     * nothing when it does. Their header parity is still covered above, which
+     * is the part that is actually deterministic.
+     *
+     * @return array<string, array{0: string}>
+     */
+    public static function ja4BrowserProvider(): array
     {
         return [
             'firefox147 (default)' => ['firefox147'],
@@ -37,13 +72,6 @@ class EngineParityTest extends TestCase
             'chrome150' => ['chrome150'],
             'safari184' => ['safari184'],
             'okhttp4_android' => ['okhttp4_android'],
-            // Profiles flagged during review as possibly incoherent. Whether
-            // their DATA is right is an upstream question — BrowserConfig is
-            // generated from upstream's curl.patch — but whether this package
-            // still matches the shared library is testable here, and that is
-            // what would catch a sync going wrong.
-            'safari260_ios (v26 cipher order)' => ['safari260_ios'],
-            'chrome131_android (client hints)' => ['chrome131_android'],
             // Hand-written rather than generated from upstream, so they are the
             // ones most likely to drift out of step with the shared library.
             'firefox133 (hand-written)' => ['firefox133'],
@@ -52,7 +80,7 @@ class EngineParityTest extends TestCase
         ];
     }
 
-    #[DataProvider('browserProvider')]
+    #[DataProvider('ja4BrowserProvider')]
     public function testBothEnginesProduceIdenticalJa4(string $browser): void
     {
         // Handle a service outage ONCE, here, the way every other TLS test does

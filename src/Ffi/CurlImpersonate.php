@@ -104,6 +104,44 @@ final class CurlImpersonate
     private const RTLD_NOW = 0x2;
     private const RTLD_DEEPBIND = 0x8;
 
+    /**
+     * The write callbacks and their buffer, created ONCE PER LIBRARY for the
+     * whole process and shared by every engine loaded from it.
+     *
+     * PHP allocates a libffi trampoline for every closure assigned to a C
+     * function-pointer field, and never frees it — there is no API to. Created
+     * per request, as these once were, that retained two trampolines and two
+     * closures per request: about 3.5 KB each time, without bound, or 350 MB
+     * per 100,000 requests in a queue worker. Created per ENGINE it was 500×
+     * smaller but still unbounded, because {@see
+     * \Raza\PHPImpersonate\PHPImpersonate::closeFfiEngines()} and the engine
+     * cache's own LRU eviction both build fresh engines (measured: 1.79 KB per
+     * create/close cycle). Keyed by library, the count is finally fixed: two
+     * trampolines for the life of the process, however many engines come and go.
+     *
+     * Sharing ONE buffer across engines is sound for the same reason the engine
+     * cache is: this engine is not reentrant and serves one request at a time
+     * (see PHPImpersonate::$ffiEngines). Nothing but libcurl runs between the
+     * reset at the start of a request and the read at the end of it.
+     *
+     * The FFI instance is kept here too, deliberately. A holder outlives its
+     * creating scope badly: once that FFI object is collected, reading `->fn`
+     * throws "Attempt to read field 'fn' of non C struct/union". Holding the
+     * instance that made them pins the scope for as long as the callbacks live.
+     *
+     * @var array<string, array{ffi: FFI, capture: ResponseCapture, body: \FFI\CData, header: \FFI\CData}>
+     */
+    private static array $sinks = [];
+
+    /** @var \FFI\CData Shared body callback; see the docblock above. */
+    private $bodySink;
+
+    /** @var \FFI\CData Shared header callback; see the docblock above. */
+    private $headerSink;
+
+    /** The shared buffer the two callbacks append to; emptied around every request. */
+    private ResponseCapture $capture;
+
     public function __construct(string $libPath)
     {
         self::bindSymbolsLocally($libPath);
@@ -113,6 +151,78 @@ final class CurlImpersonate
         if ($this->handle === null) {
             throw new RequestException('libcurl-impersonate: curl_easy_init() failed');
         }
+
+        $sinks = self::sharedSinks($libPath, $this->ffi);
+        $this->capture = $sinks['capture'];
+        $this->bodySink = $sinks['body'];
+        $this->headerSink = $sinks['header'];
+    }
+
+    /**
+     * The process-wide callbacks for one library, created on first use.
+     *
+     * Capturing straight into PHP strings through libcurl's callbacks replaced
+     * open_memstream(): a C buffer that grew by doubling and was then copied
+     * whole into PHP, about 3.5× the body in RSS for a large response and none
+     * of it visible to memory_limit. A callback appends each chunk as it
+     * arrives, so the only copy is PHP's.
+     *
+     * The closures capture the small ResponseCapture object and nothing else.
+     * They live for the rest of the process, so capturing an engine would pin
+     * that engine, its curl handle and its kept-alive connections forever.
+     *
+     * @return array{ffi: FFI, capture: ResponseCapture, body: \FFI\CData, header: \FFI\CData}
+     */
+    private static function sharedSinks(string $libPath, FFI $ffi): array
+    {
+        if (isset(self::$sinks[$libPath])) {
+            return self::$sinks[$libPath];
+        }
+
+        $capture = new ResponseCapture();
+
+        $body = $ffi->new('php_impersonate_cb_holder');
+        $body->fn = static function ($ptr, int $size, int $nmemb, $userdata) use ($capture): int {
+            $length = $size * $nmemb;
+
+            try {
+                if ($length > 0) {
+                    $capture->body .= FFI::string($ptr, $length);
+                }
+
+                return $length;
+            } catch (\Throwable $e) {
+                // Never let an exception cross the C boundary: report a short
+                // write so curl aborts with CURLE_WRITE_ERROR, and rethrow later.
+                $capture->error = $e;
+
+                return 0;
+            }
+        };
+
+        $header = $ffi->new('php_impersonate_cb_holder');
+        $header->fn = static function ($ptr, int $size, int $nmemb, $userdata) use ($capture): int {
+            $length = $size * $nmemb;
+
+            try {
+                if ($length > 0) {
+                    $capture->headers .= FFI::string($ptr, $length);
+                }
+
+                return $length;
+            } catch (\Throwable $e) {
+                $capture->error = $e;
+
+                return 0;
+            }
+        };
+
+        return self::$sinks[$libPath] = [
+            'ffi' => $ffi,
+            'capture' => $capture,
+            'body' => $body,
+            'header' => $header,
+        ];
     }
 
     public function __destruct()
@@ -286,52 +396,10 @@ final class CurlImpersonate
         $ffi->curl_easy_setopt($h, self::CURLOPT_COOKIEFILE, '');
         $ffi->curl_easy_setopt($h, self::CURLOPT_COOKIELIST, 'ALL');
 
-        // Capture straight into PHP strings via libcurl's callbacks. This used
-        // to go through open_memstream(): a C buffer that grew by doubling,
-        // then got copied whole into PHP — about 3.5× the body in RSS for a
-        // large response, none of it visible to memory_limit. A callback
-        // appends each 16 KB chunk as it arrives, so the only copy is PHP's.
-        // The holders must outlive curl_easy_perform(): the C trampoline is
-        // released with them.
-        $responseBody = '';
-        $responseHeaders = '';
-        $callbackError = null;
-
-        $bodySink = $ffi->new('php_impersonate_cb_holder');
-        $bodySink->fn = static function ($ptr, int $size, int $nmemb, $userdata) use (&$responseBody, &$callbackError): int {
-            $length = $size * $nmemb;
-
-            try {
-                if ($length > 0) {
-                    $responseBody .= FFI::string($ptr, $length);
-                }
-
-                return $length;
-            } catch (\Throwable $e) {
-                // Never let an exception cross the C boundary: report a short
-                // write so curl aborts with CURLE_WRITE_ERROR, and rethrow below.
-                $callbackError = $e;
-
-                return 0;
-            }
-        };
-
-        $headerSink = $ffi->new('php_impersonate_cb_holder');
-        $headerSink->fn = static function ($ptr, int $size, int $nmemb, $userdata) use (&$responseHeaders, &$callbackError): int {
-            $length = $size * $nmemb;
-
-            try {
-                if ($length > 0) {
-                    $responseHeaders .= FFI::string($ptr, $length);
-                }
-
-                return $length;
-            } catch (\Throwable $e) {
-                $callbackError = $e;
-
-                return 0;
-            }
-        };
+        // The callbacks are process-wide (see self::$sinks); only their buffer
+        // is per request, and it is emptied at both ends of one.
+        $capture = $this->capture;
+        $capture->reset();
 
         $slist = null;
 
@@ -368,8 +436,10 @@ final class CurlImpersonate
             if (! isset($curlOptions['max-filesize'])) {
                 $ffi->curl_easy_setopt($h, CurlOptions::CURLOPT_MAXFILESIZE_LARGE, CurlOptions::DEFAULT_MAX_FILESIZE);
             }
-            $ffi->curl_easy_setopt($h, self::CURLOPT_WRITEFUNCTION, $bodySink->fn);
-            $ffi->curl_easy_setopt($h, self::CURLOPT_HEADERFUNCTION, $headerSink->fn);
+            // Re-applied every request because curl_easy_reset() clears them,
+            // but always from the same holders (see the property docblock).
+            $ffi->curl_easy_setopt($h, self::CURLOPT_WRITEFUNCTION, $this->bodySink->fn);
+            $ffi->curl_easy_setopt($h, self::CURLOPT_HEADERFUNCTION, $this->headerSink->fn);
 
             // Apply the full browser fingerprint (TLS, HTTP/2, base headers).
             // A target the loaded library does not know returns non-zero and
@@ -408,11 +478,11 @@ final class CurlImpersonate
 
             $rc = $ffi->curl_easy_perform($h);
 
-            if ($callbackError !== null) {
+            if ($capture->error !== null) {
                 throw new RequestException(
-                    'libcurl-impersonate: failed while receiving the response: ' . $callbackError->getMessage(),
+                    'libcurl-impersonate: failed while receiving the response: ' . $capture->error->getMessage(),
                     $rc,
-                    $callbackError
+                    $capture->error
                 );
             }
 
@@ -440,19 +510,18 @@ final class CurlImpersonate
 
             return [
                 'status' => (int) $status->cdata,
-                'headers' => $responseHeaders,
-                'body' => $responseBody,
+                'headers' => $capture->headers,
+                'body' => $capture->body,
                 'url' => $effectiveUrl,
             ];
         } finally {
             if ($slist !== null) {
                 $ffi->curl_slist_free_all($slist);
             }
-            // Leave no dangling trampoline on the handle: the next request sets
-            // fresh ones, but a request that failed before reaching setopt()
-            // would otherwise inherit pointers into freed holders.
-            $ffi->curl_easy_setopt($h, self::CURLOPT_WRITEFUNCTION, null);
-            $ffi->curl_easy_setopt($h, self::CURLOPT_HEADERFUNCTION, null);
+            // The returned array holds its own reference to the strings; drop
+            // the buffers' so a large body is not kept alive until the next
+            // request by closures that themselves live for the whole process.
+            $capture->reset();
         }
     }
 

@@ -8,8 +8,9 @@
 
 Make HTTP requests that look like a **real browser**. PHP-Impersonate wraps
 [curl-impersonate](https://github.com/lexiforest/curl-impersonate) to reproduce
-the exact TLS and HTTP/2 fingerprints of Chrome, Firefox, Safari, Edge and Tor —
-so requests sail past the anti-bot checks that block ordinary HTTP clients.
+the exact TLS and HTTP/2 fingerprints of Chrome, Firefox, Safari, Edge and Tor,
+so your requests carry a browser's signature instead of the one that gets
+ordinary HTTP clients blocked.
 
 ```php
 use Raza\PHPImpersonate\PHPImpersonate;
@@ -40,7 +41,8 @@ handshake as a chosen browser version, so your request looks like it came from
 that browser.
 
 - 🎭 **39 browser profiles** — Chrome, Firefox, Safari (desktop + iOS), Edge, Tor, OkHttp.
-- 🔒 **Real TLS/JA4 + HTTP/2 fingerprints**, not just a `User-Agent` string.
+- 🔒 **Real TLS/JA4 + HTTP/2 fingerprints**, not just a `User-Agent` string —
+  taken from curl-impersonate's own table, so both engines send the same bytes.
 - ⚡ **Two engines, one class** — a zero-setup executable, and an optional in-process FFI
   path that reuses connections for serious throughput.
 - 📦 **Batteries included** — binaries ship in the package for common platforms.
@@ -88,7 +90,7 @@ one that works in your environment — you never touch a second class.
 |---|---|---|
 | How | calls `libcurl-impersonate` in-process via PHP FFI | runs the bundled `curl-impersonate` binary per request |
 | Performance | no process spawn; **keep-alive connections reused** across requests | one short-lived process per request |
-| Requirements | the `ffi` extension usable + the shared library (bundled on common platforms) | none — works everywhere |
+| Requirements | the `ffi` extension usable + the shared library (see [platforms](#supported-platforms)) | none — works everywhere |
 | Curl options | ✅ same curated set | ✅ same curated set |
 
 > [!TIP]
@@ -633,6 +635,18 @@ Any test whose service is unreachable **skips** rather than fails, so an outage
 never breaks the suite. The TLS-fingerprint tests use an external service
 (`tls.peet.ws`, override with `TLS_FINGERPRINT_URL`) since httpbin can't report
 JA3/JA4; they skip too when it's unavailable.
+
+Two environment variables change that, both used by CI:
+
+| Variable | Effect |
+| --- | --- |
+| `REQUIRE_LIVE_SERVICES=1` | An unreachable service **fails** instead of skipping. Set it where a silent skip would be mistaken for a pass. |
+| `PHP_IMPERSONATE_BUILD_FIXTURES=1` | Runs the tests that compile small C fixtures with `gcc` to reproduce the symbol-interposition bug. Skipped by default, since not every machine has a compiler. |
+
+Contributors changing how a profile reaches the wire should read
+[docs/CONFIGURATION_BASED_APPROACH.md](docs/CONFIGURATION_BASED_APPROACH.md)
+first: `BrowserConfig` is **not** what goes on the wire for a built-in browser,
+which catches most people out once.
 
 ## License
 

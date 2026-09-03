@@ -123,8 +123,9 @@ Tags keep their names, so Packagist releases are unaffected.
 
 ## Notes & caveats
 
-- **Windows** ships a self-contained `curl.exe`; the older auxiliary DLLs left
-  in `bin/windows-x86_64/` are unused by it. Test on Windows before releasing.
+- **Windows** ships a self-contained `curl.exe` plus `libcurl-impersonate.dll`
+  for the FFI engine; both import only system DLLs, so nothing else travels
+  with them. Test on Windows before releasing.
 - **Header casing** for a target's `User-Agent` is normalised to `User-Agent`
   (HTTP/2 lowercases header names on the wire, so this doesn't change the
   fingerprint); other header names are kept exactly as upstream.

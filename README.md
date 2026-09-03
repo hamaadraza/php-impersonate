@@ -178,13 +178,6 @@ CLI; other SAPIs also need `ffi.enable` — and the shared library loads on this
 platform (bundled for [common platforms](#supported-platforms);
 `PHP_IMPERSONATE_LIB` overrides it).
 
-> [!NOTE]
-> On **Windows** the shared library is not bundled, so `auto` uses the
-> executable engine until you run `php vendor/hamaadraza/php-impersonate/bin/php-impersonate-install`,
-> which fetches it. Either way the fingerprints are identical; the FFI engine
-> only makes requests faster by reusing connections. (The engine was
-> POSIX-only until it stopped capturing responses through `open_memstream`.)
-
 > [!WARNING]
 > **A libcurl compiled into the `php` binary** (ext-curl built in rather than
 > loaded as a module: the official Docker images, some source builds) sits
@@ -210,7 +203,7 @@ common platforms, so everything works with no extra steps:
 |---|:---:|:---:|
 | Linux x86_64 (glibc) | bundled | bundled |
 | macOS ARM64 (Apple Silicon) | bundled | bundled |
-| Windows x86_64 | bundled | on demand |
+| Windows x86_64 | bundled | bundled |
 | Linux x86_64 (musl / Alpine) | on demand | on demand |
 | Linux ARM64 (glibc & musl) | on demand | on demand |
 | macOS x86_64 (Intel) | on demand | on demand |

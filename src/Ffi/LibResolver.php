@@ -99,9 +99,8 @@ final class LibResolver
      *
      * Windows is included: the engine was POSIX-only while it captured
      * responses through open_memstream, and no longer is now that they come
-     * through libcurl's own write callbacks. The DLL is not committed to the
-     * package, so on Windows it arrives via bin/php-impersonate-install and
-     * the executable engine serves until it does.
+     * through libcurl's own write callbacks. Its DLL is bundled alongside the
+     * Linux and macOS libraries.
      *
      * @return list<string>
      */

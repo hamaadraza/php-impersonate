@@ -43,6 +43,10 @@ final class CurlImpersonate
     private const CURLOPT_COOKIELIST = 10135;
     private const CURLOPT_WRITEFUNCTION = 20011; // CURLOPTTYPE_FUNCTIONPOINT (20000) + 11
     private const CURLOPT_HEADERFUNCTION = 20079; // CURLOPTTYPE_FUNCTIONPOINT (20000) + 79
+    private const CURLOPT_SSL_OPTIONS = 216; // CURLOPTTYPE_VALUES (0) + 216
+
+    /** CURLSSLOPT_NATIVE_CA: verify against the OS trust store (Windows). */
+    private const CURLSSLOPT_NATIVE_CA = 16;
 
     /**
      * Long-typed protocol bitmask, deliberately in preference to the newer
@@ -70,9 +74,17 @@ final class CurlImpersonate
      * that a given variadic argument is a function pointer, but it does turn a
      * PHP closure assigned to a function-pointer struct FIELD into a C
      * trampoline, and that field is then passed as an ordinary pointer.
+     *
+     * `size_t` is spelled `unsigned long long` rather than `unsigned long`
+     * because that is 64 bits on every architecture this package supports,
+     * including Windows. Unix is LP64, where `unsigned long` is also 64 bits,
+     * but Windows x64 is LLP64, where it is 32 — so the obvious spelling would
+     * declare the callback's lengths half the width libcurl passes them. Both
+     * supported architectures (x86_64, aarch64) are 64-bit, so one typedef
+     * covers them all; a 32-bit target would need its own.
      */
     private const HEADER = <<<'CDEF'
-        typedef unsigned long size_t;
+        typedef unsigned long long size_t;
         typedef size_t (*php_impersonate_write_cb)(char *ptr, size_t size, size_t nmemb, void *userdata);
         typedef struct { php_impersonate_write_cb fn; } php_impersonate_cb_holder;
         void *curl_easy_init(void);
@@ -260,8 +272,10 @@ final class CurlImpersonate
      * the global scope, which is exactly the binding a self-contained library
      * needs. FFI::cdef() reuses the mapping this dlopen() creates, flags
      * included. glibc only: musl has no such flag (there, {@see probeTarget()}
-     * detects the problem and the engine is reported unavailable) and macOS
-     * does not need it (its two-level namespace already binds locally).
+     * detects the problem and the engine is reported unavailable), macOS does
+     * not need it (its two-level namespace already binds locally), and neither
+     * does Windows, where a DLL's imports bind to the module named in its own
+     * import table and its internal calls never go through one at all.
      * Verified against an executable that defines curl_easy_setopt(): 48
      * without this, 0 with it.
      */
@@ -327,14 +341,14 @@ final class CurlImpersonate
         if (! extension_loaded('FFI')) {
             return false;
         }
-        // No shared library ships for Windows (see LibResolver::libraryNames()
-        // and BinaryInstaller::libIsUsable()), so the executable engine is
-        // always used there. The engine itself no longer depends on any
-        // POSIX-only symbol — responses are captured through libcurl's own
-        // write callbacks — so this is a packaging limit, not a technical one.
-        if (PlatformDetector::isWindows()) {
-            return false;
-        }
+
+        // Windows is supported here too. It was refused outright while the
+        // engine captured responses through open_memstream, which no Windows
+        // build exports; responses now come through libcurl's own write
+        // callbacks, so no POSIX-specific symbol is left. What remains is
+        // ordinary: the DLL has to be present, which on Windows means running
+        // bin/php-impersonate-install, and ffiAvailable() reports it plainly
+        // when it is not.
         $enable = strtolower(trim((string) ini_get('ffi.enable')));
 
         // An explicit "off" wins everywhere, the CLI included: a hardened
@@ -637,8 +651,8 @@ final class CurlImpersonate
             return;
         }
 
-        // POSIX-only engine (see isSupported()), so a CA bundle path is always
-        // the right mechanism; BoringSSL does not auto-discover the trust store.
+        // BoringSSL does not auto-discover a trust store, so one has to be
+        // named explicitly or asked for by name.
         $ca = CaBundle::path();
         if ($ca !== null) {
             $this->ffi->curl_easy_setopt($h, self::CURLOPT_CAINFO, $ca);
@@ -647,6 +661,17 @@ final class CurlImpersonate
         $caDir = CaBundle::directory();
         if ($caDir !== null) {
             $this->ffi->curl_easy_setopt($h, CurlOptions::CURLOPT_CAPATH, $caDir);
+        }
+
+        // Only when nothing was resolved, which on Windows is the normal case:
+        // CaBundle knows the Unix bundle locations and no Windows equivalent
+        // exists, so without this every HTTPS request would fail verification
+        // for want of any trust store at all. Mirrors the executable engine's
+        // `--ca-native` (see CurlProcess::addSslCertOptions()); an explicit
+        // CURL_CA_BUNDLE or SSL_CERT_FILE still wins, which is the point of
+        // setting it.
+        if ($ca === null && $caDir === null && PlatformDetector::isWindows()) {
+            $this->ffi->curl_easy_setopt($h, self::CURLOPT_SSL_OPTIONS, self::CURLSSLOPT_NATIVE_CA);
         }
     }
 

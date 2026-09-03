@@ -308,15 +308,15 @@ final class BinaryInstaller
     /**
      * Whether the FFI shared library is of any use on this platform.
      *
-     * It is not on Windows: the FFI engine captures responses through
-     * open_memstream, which no Windows build exports, so
-     * CurlImpersonate::isSupported() refuses Windows outright and
-     * LibResolver deliberately knows no .dll names. Installing one there put
-     * ~3.9 MB into every package for a file nothing could ever load.
+     * Every platform upstream ships one for, Windows included since the FFI
+     * engine stopped depending on open_memstream (which no Windows build
+     * exports) and started capturing responses through libcurl's own write
+     * callbacks. Kept as the single place to say otherwise, should upstream
+     * ever publish an executable for a target it has no library for.
      */
     public function libIsUsable(string $dir): bool
     {
-        return ! str_starts_with($dir, 'windows');
+        return true;
     }
 
     /**

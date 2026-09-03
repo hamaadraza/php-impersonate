@@ -37,3 +37,8 @@ testbench.yaml
 /bin/linux-aarch64/
 /bin/linux-aarch64-musl/
 /bin/macos-x86_64/
+
+# Fetched on demand by bin/php-impersonate-install; the executable engine
+# serves Windows until it is present. Not committed while Windows FFI support
+# is new: promote it with `composer update-binaries -- --libs-only --only=windows-x86_64`.
+/bin/windows-x86_64/libcurl-impersonate.dll

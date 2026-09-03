@@ -177,9 +177,11 @@ platform (bundled for [common platforms](#supported-platforms);
 `PHP_IMPERSONATE_LIB` overrides it).
 
 > [!NOTE]
-> The FFI engine is **POSIX-only** (Linux and macOS). On Windows the executable
-> engine is always used — `auto` handles this transparently, so nothing changes
-> for you; the fingerprints are identical either way.
+> On **Windows** the shared library is not bundled, so `auto` uses the
+> executable engine until you run `php vendor/hamaadraza/php-impersonate/bin/php-impersonate-install`,
+> which fetches it. Either way the fingerprints are identical; the FFI engine
+> only makes requests faster by reusing connections. (The engine was
+> POSIX-only until it stopped capturing responses through `open_memstream`.)
 
 > [!WARNING]
 > **A libcurl compiled into the `php` binary** (ext-curl built in rather than
@@ -192,6 +194,8 @@ platform (bundled for [common platforms](#supported-platforms);
 > `ffiAvailable()` detects the situation (it checks that the default profile
 > actually applies, not just that the library loads), `auto` uses the executable
 > engine, and `ffiUnavailableReason()` spells it out. Nothing crashes either way.
+> **Windows** cannot hit this at all: a DLL's imports bind to the module its own
+> import table names, and the library's internal calls never go through one.
 
 ---
 
@@ -204,7 +208,7 @@ common platforms, so everything works with no extra steps:
 |---|:---:|:---:|
 | Linux x86_64 (glibc) | bundled | bundled |
 | macOS ARM64 (Apple Silicon) | bundled | bundled |
-| Windows x86_64 | bundled | n/a — no shared library is shipped for Windows |
+| Windows x86_64 | bundled | on demand |
 | Linux x86_64 (musl / Alpine) | on demand | on demand |
 | Linux ARM64 (glibc & musl) | on demand | on demand |
 | macOS x86_64 (Intel) | on demand | on demand |

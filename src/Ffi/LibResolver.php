@@ -97,16 +97,20 @@ final class LibResolver
     /**
      * Possible library filenames for the current platform.
      *
-     * Windows is deliberately absent: the FFI engine is POSIX-only because it
-     * captures responses through open_memstream, so
-     * {@see \Raza\PHPImpersonate\Ffi\CurlImpersonate::isSupported()} refuses
-     * Windows before anything gets here. Add the DLL names back if that ever
-     * changes.
+     * Windows is included: the engine was POSIX-only while it captured
+     * responses through open_memstream, and no longer is now that they come
+     * through libcurl's own write callbacks. The DLL is not committed to the
+     * package, so on Windows it arrives via bin/php-impersonate-install and
+     * the executable engine serves until it does.
      *
      * @return list<string>
      */
     private static function libraryNames(): array
     {
+        if (PlatformDetector::isWindows()) {
+            return ['libcurl-impersonate.dll'];
+        }
+
         if (PlatformDetector::isMacOS()) {
             return ['libcurl-impersonate.dylib', 'libcurl-impersonate.4.dylib'];
         }

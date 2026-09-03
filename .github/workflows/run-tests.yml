@@ -154,9 +154,9 @@ jobs:
 
       # Every FFI test skips silently when the engine is unavailable, so a
       # green run said nothing about whether the FFI engine was exercised at
-      # all. On the platforms that ship a shared library it must be.
+      # all. On every platform a shared library exists for — Windows included
+      # since the engine stopped depending on open_memstream — it must be.
       - name: Assert the FFI engine is usable
-        if: runner.os != 'Windows'
         shell: bash
         run: |
           php -r 'require "vendor/autoload.php"; $ok = Raza\PHPImpersonate\PHPImpersonate::ffiAvailable(); echo "FFI engine available: ", var_export($ok, true), PHP_EOL; if (! $ok) { echo Raza\PHPImpersonate\PHPImpersonate::ffiUnavailableReason(), PHP_EOL; } exit($ok ? 0 : 1);'
@@ -165,7 +165,7 @@ jobs:
       # build, segfaults — run every FFI stage in its own process so the log
       # names the stage that crashed and the build it crashed under.
       - name: Diagnose the FFI engine
-        if: failure() && runner.os != 'Windows'
+        if: failure()
         run: php scripts/ffi-diagnose.php
 
       # Run httpbin locally on EVERY leg so the HTTP behaviour tests never

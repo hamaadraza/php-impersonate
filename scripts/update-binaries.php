@@ -87,7 +87,7 @@ try {
             fwrite(STDOUT, $results[$dir]['message'] . "\n");
         }
         if ($doLibs && ! $installer->libIsUsable($dir)) {
-            fwrite(STDOUT, sprintf("Skipping %s library: the FFI engine is POSIX-only, nothing can load it.\n", $dir));
+            fwrite(STDOUT, sprintf("Skipping %s library: no usable shared library for that platform.\n", $dir));
         } elseif ($doLibs) {
             fwrite(STDOUT, "Installing $dir library ... ");
             $lib = $installer->installLib($version, $dir, $spec, $manifest);

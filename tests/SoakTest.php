@@ -86,18 +86,34 @@ class SoakTest extends TestCase
         );
 
         // Resident memory catches growth PHP cannot see (C allocations). Only
-        // where /proc exists; the threshold leaves room for allocator noise.
+        // where /proc exists. The threshold leaves room for allocator noise
+        // AND for QEMU: the emulated ARM64 legs run under user-mode QEMU,
+        // whose translation cache lives inside the process's RSS and grows as
+        // code paths are first executed — the Alpine ARM64 leg measured
+        // 2192 KB of growth over 300 process-engine requests on one run and
+        // under 2048 on the next. The leak this guards was ~5 MB at the FFI
+        // request count, so 4 MB still catches it.
         if ($rssBefore !== null) {
             $rssGrowth = (int) self::rssKb() - $rssBefore;
             $this->assertLessThan(
-                2048,
+                4096,
                 $rssGrowth,
                 sprintf('%s: RSS grew by %d KB over %d requests (%.2f KB/request)', $engine, $rssGrowth, $requests, $rssGrowth / $requests)
             );
         }
 
+        // A per-request descriptor leak shows as hundreds; one descriptor is
+        // libcurl caught mid-flight — a keep-alive connection the server
+        // closed and curl reopened, or its threaded resolver's wakeup pipe
+        // after the 60-second DNS cache expired — and was a one-off failure
+        // on a run that passed the same code before and after.
         if ($fdsBefore !== null) {
-            $this->assertSame($fdsBefore, self::openFds(), "$engine: file descriptors leaked");
+            $fdsAfter = (int) self::openFds();
+            $this->assertLessThanOrEqual(
+                $fdsBefore + 2,
+                $fdsAfter,
+                sprintf('%s: file descriptors leaked (%d before, %d after)', $engine, $fdsBefore, $fdsAfter)
+            );
         }
 
         $this->assertSame($tempBefore, self::tempFiles(), "$engine: temp files left behind");

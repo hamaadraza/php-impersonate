@@ -23,7 +23,9 @@ use Raza\PHPImpersonate\Exception\RequestException;
  * refuses the chunk that would cross it, which curl reports as a write error
  * and the engine throws with curl's own "too large" code.
  *
- * The body comes from a `php -S` started here: httpbin caps /bytes at 100 KB.
+ * The body comes from a small socket server started here (see
+ * tests/fixtures/body-server.php): httpbin caps /bytes at 100 KB and streams
+ * /drip byte by byte, and `php -S` dropped a large body on Windows.
  */
 final class FfiBodyBudgetTest extends TestCase
 {
@@ -32,10 +34,20 @@ final class FfiBodyBudgetTest extends TestCase
 
     private const MIB = 1024 * 1024;
 
+    /**
+     * Headroom above current usage while the body arrives. The budget is at
+     * most half of it less a margin — about 5 MiB — and the string growth that
+     * budget allows peaks well under it.
+     */
+    private const HEADROOM = 16 * self::MIB;
+
+    private string|false $originalMemoryLimit = false;
+
     /** @var resource|null */
     private $server = null;
 
-    private string|false $originalMemoryLimit = false;
+    /** @var list<resource> */
+    private array $serverPipes = [];
 
     protected function setUp(): void
     {
@@ -54,6 +66,11 @@ final class FfiBodyBudgetTest extends TestCase
 
         if (is_resource($this->server)) {
             proc_terminate($this->server);
+            foreach ($this->serverPipes as $pipe) {
+                if (is_resource($pipe)) {
+                    fclose($pipe);
+                }
+            }
             proc_close($this->server);
             $this->server = null;
         }
@@ -68,13 +85,11 @@ final class FfiBodyBudgetTest extends TestCase
         // headroom below is measured against what the transfer will see.
         $this->assertSame(1000, strlen($client->sendGet("$base/?bytes=1000")->body()));
 
-        // 32 MiB of headroom: the budget lands at about 13 MiB, and the string
-        // growth that budget allows peaks well under the limit.
-        $this->assertNotFalse(ini_set('memory_limit', (string) (memory_get_usage(true) + 32 * self::MIB)));
+        $this->assertNotFalse(ini_set('memory_limit', (string) (memory_get_usage(true) + self::HEADROOM)));
 
         try {
-            $client->sendGet("$base/?bytes=" . (48 * self::MIB));
-            $this->fail('a 48 MiB body was buffered under a memory_limit 32 MiB above usage');
+            $client->sendGet("$base/?bytes=" . (12 * self::MIB));
+            $this->fail('a 12 MiB body was buffered under a memory_limit 16 MiB above usage');
         } catch (RequestException $e) {
             $this->assertSame(self::CURLE_FILESIZE_EXCEEDED, $e->getCode(), $e->getMessage());
             $this->assertStringContainsString('memory_limit', $e->getMessage());
@@ -90,12 +105,12 @@ final class FfiBodyBudgetTest extends TestCase
         $client = new PHPImpersonate('chrome146', 30, [], PHPImpersonate::ENGINE_FFI);
         $this->assertSame(1000, strlen($client->sendGet("$base/?bytes=1000")->body()));
 
-        $this->assertNotFalse(ini_set('memory_limit', (string) (memory_get_usage(true) + 32 * self::MIB)));
+        $this->assertNotFalse(ini_set('memory_limit', (string) (memory_get_usage(true) + self::HEADROOM)));
 
-        $response = $client->sendGet("$base/?bytes=" . (4 * self::MIB));
+        $response = $client->sendGet("$base/?bytes=" . (2 * self::MIB));
 
         $this->assertSame(200, $response->status());
-        $this->assertSame(4 * self::MIB, strlen($response->body()));
+        $this->assertSame(2 * self::MIB, strlen($response->body()));
     }
 
     public function testNoMemoryLimitMeansNoBudget(): void
@@ -139,54 +154,37 @@ final class FfiBodyBudgetTest extends TestCase
         ];
     }
 
+    /**
+     * Start the body server and return its base URL. The server picks its
+     * own port and announces it, so there is no port race and no connect
+     * probe — a probe against a not-yet-listening loopback port can even
+     * connect to itself on Linux.
+     */
+    private function startBodyServer(): string
+    {
+        $null = PHP_OS_FAMILY === 'Windows' ? 'NUL' : '/dev/null';
+        $server = proc_open(
+            [PHP_BINARY, __DIR__ . '/fixtures/body-server.php'],
+            [1 => ['pipe', 'w'], 2 => ['file', $null, 'w']],
+            $pipes,
+            __DIR__ . '/fixtures'
+        );
+        $this->assertIsResource($server, 'the body server did not start');
+        $this->server = $server;
+        $this->serverPipes = array_values($pipes);
+
+        stream_set_timeout($pipes[1], 10);
+        $line = fgets($pipes[1]);
+        $this->assertIsString($line, 'the body server did not announce its port within ten seconds');
+        $this->assertMatchesRegularExpression('/^port=\d+$/', trim($line));
+
+        return 'http://127.0.0.1:' . (int) substr(trim($line), 5);
+    }
+
     private function bodyBudget(): int
     {
         $budget = (new ReflectionClass(CurlImpersonate::class))->getMethod('bodyBudget');
 
         return $budget->invoke(null);
-    }
-
-    /**
-     * Start `php -S` on a free loopback port with the body router and return
-     * its base URL.
-     */
-    private function startBodyServer(): string
-    {
-        $probe = stream_socket_server('tcp://127.0.0.1:0', $errno, $errstr);
-        $this->assertNotFalse($probe, "cannot find a free port: $errstr");
-        $name = (string) stream_socket_get_name($probe, false);
-        fclose($probe);
-        $port = (int) substr($name, strrpos($name, ':') + 1);
-
-        $null = PHP_OS_FAMILY === 'Windows' ? 'NUL' : '/dev/null';
-        $this->server = proc_open(
-            [PHP_BINARY, '-S', "127.0.0.1:$port", __DIR__ . '/fixtures/body-server.php'],
-            [1 => ['file', $null, 'w'], 2 => ['file', $null, 'w']],
-            $pipes,
-            __DIR__ . '/fixtures'
-        );
-        $this->assertIsResource($this->server, 'php -S did not start');
-
-        // A full HTTP exchange, not a bare connect: on Linux a connect to a
-        // closed loopback port in the ephemeral range can succeed by
-        // connecting to ITSELF (the kernel picks the same port as source), so
-        // a connect-only probe reported the server up at 0 ms and the first
-        // real request then failed with "could not connect".
-        for ($i = 0; $i < 100; $i++) {
-            $connection = @fsockopen('127.0.0.1', $port, $errno, $errstr, 0.2);
-            if ($connection !== false) {
-                stream_set_timeout($connection, 2);
-                fwrite($connection, "GET /?bytes=1 HTTP/1.0\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n");
-                $reply = (string) stream_get_contents($connection, 512);
-                fclose($connection);
-
-                if (str_starts_with($reply, 'HTTP/1.') && str_contains($reply, ' 200 ')) {
-                    return "http://127.0.0.1:$port";
-                }
-            }
-            usleep(50000);
-        }
-
-        $this->fail("php -S did not answer on port $port within five seconds");
     }
 }

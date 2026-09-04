@@ -2,6 +2,10 @@
 
 All notable changes to `php-impersonate` will be documented in this file.
 
+## v2.0.0 - 2026-09-04
+
+**Full Changelog**: https://github.com/hamaadraza/php-impersonate/compare/v1.0.9...v2.0.0
+
 ## Unreleased
 
 ### Breaking changes
@@ -28,6 +32,7 @@ This release is **2.0.0**. Everything below is a deliberate change of contract; 
 3. Remove any curl option not in the allow-list; set a custom `User-Agent` as a request header instead.
 4. Pass `'chrome99_android'` explicitly if you relied on the old default.
 5. Replace `PHPImpersonateFactory::get()` with `PHPImpersonate::get()`.
+
 ### Added
 
 - **The FFI engine now supports Windows.** It was refused outright while it captured responses through `open_memstream`, which no Windows build exports; responses have since moved to libcurl's own write callbacks, leaving nothing POSIX-specific. Three things were needed beyond lifting the guard: `size_t` is now spelled `unsigned long long`, because Windows x64 is LLP64 and the previous `unsigned long` is 32 bits there against libcurl's 64 (it happens to survive on x86-64, where the low half of the register carries the value, but it was wrong); the CA trust store is requested with `CURLSSLOPT_NATIVE_CA`, since `CaBundle` knows only Unix bundle locations and BoringSSL discovers none by itself, so HTTPS would otherwise fail verification outright (this mirrors the executable engine's `--ca-native`); and `LibResolver` now looks for `libcurl-impersonate.dll`. The DLL is bundled like the Linux and macOS ones, so Windows gets the faster engine with no extra step. Upstream's Windows library is self-contained, importing only `CRYPT32`, `IPHLPAPI`, `KERNEL32`, `Normaliz` and `WS2_32`. The symbol-interposition problem that affects Linux cannot occur on Windows, where a DLL's imports bind to the module named in its own import table.

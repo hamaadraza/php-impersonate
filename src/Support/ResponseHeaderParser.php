@@ -66,6 +66,19 @@ final class ResponseHeaderParser
         /** @var string|null $lastName the field a continuation line would extend */
         $lastName = null;
 
+        /**
+         * Field names are case-insensitive (RFC 9110 §5.1), so `Set-Cookie`
+         * and `set-cookie` in one response are the same field. Keyed by the
+         * raw name they became two entries, and Response's lookups — which
+         * stop at the first case-insensitive match — returned only one of
+         * them. Reachable on HTTP/1.1 through a proxy or CDN that appends its
+         * own lowercase headers to an origin's mixed-case ones. The first
+         * spelling seen is the one kept.
+         *
+         * @var array<string,string> lower-cased name => the spelling in use
+         */
+        $spellings = [];
+
         foreach ($lines as $rawLine) {
             $line = trim($rawLine);
 
@@ -105,6 +118,7 @@ final class ResponseHeaderParser
                 $value = trim(substr($line, $colonPos + 1));
 
                 if ($name !== '') {
+                    $name = $spellings[strtolower($name)] ??= $name;
                     $headers[$name][] = $value;
                     $lastName = $name;
                 }

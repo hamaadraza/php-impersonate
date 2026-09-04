@@ -224,7 +224,7 @@ class CurlOptionsTest extends TestCase
     public function testAssertAllowedRejectsNonNumericLongValues(): void
     {
         $this->expectException(InvalidArgumentException::class);
-        $this->expectExceptionMessage('expected a number');
+        $this->expectExceptionMessage('expected a whole number of 0 or more');
 
         CurlOptions::assertAllowed(['max-redirs' => 'many']);
     }
@@ -233,5 +233,40 @@ class CurlOptionsTest extends TestCase
     {
         CurlOptions::assertAllowed(['max-redirs' => '10']);
         $this->addToAssertionCount(1);
+    }
+
+    /**
+     * @return array<string, array{0: string, 1: mixed}>
+     */
+    public static function negativeOrFractionalProvider(): array
+    {
+        return [
+            'max-redirs -1 (libcurl: unlimited)' => ['max-redirs', -1],
+            'max-filesize -1' => ['max-filesize', -1],
+            'max-filesize "-5"' => ['max-filesize', '-5'],
+            'max-redirs 1.5' => ['max-redirs', '1.5'],
+        ];
+    }
+
+    /**
+     * -1 is libcurl's "unlimited" for max-redirs, and a negative max-filesize
+     * was rejected by libcurl with an unchecked return code after the engine
+     * had already skipped its own default — either way a safety default
+     * disappeared without a word.
+     */
+    #[DataProvider('negativeOrFractionalProvider')]
+    public function testNegativeOrFractionalNumericOptionsAreRejected(string $key, mixed $value): void
+    {
+        $this->expectException(InvalidArgumentException::class);
+        $this->expectExceptionMessage('whole number of 0 or more');
+
+        CurlOptions::assertAllowed([$key => $value]);
+    }
+
+    public function testZeroIsAcceptedForNumericOptions(): void
+    {
+        CurlOptions::assertAllowed(['max-redirs' => 0, 'max-filesize' => '0']);
+
+        $this->assertSame(['max-filesize' => 0, 'max-redirs' => 0], CurlOptions::normalize(['max-redirs' => 0, 'max-filesize' => '0']));
     }
 }

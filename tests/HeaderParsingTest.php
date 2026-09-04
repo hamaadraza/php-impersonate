@@ -362,4 +362,19 @@ class HeaderParsingTest extends TestCase
         $this->assertSame([], ResponseHeaderParser::setCookieHeaders("HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\n"));
         $this->assertSame([], ResponseHeaderParser::setCookieHeaders(''));
     }
+
+    /**
+     * Field names are case-insensitive, so two spellings in one response are
+     * one field. An origin's `Set-Cookie` plus a proxy's `set-cookie` used to
+     * become two keys, and Response's lookups stopped at the first.
+     */
+    public function testNamesDifferingOnlyInCaseAreOneHeader(): void
+    {
+        $raw = "HTTP/1.1 200 OK\r\nSet-Cookie: a=1\r\nset-cookie: b=2\r\nSET-COOKIE: c=3\r\nX-One: x\r\n";
+
+        $result = $this->parseHeaders($raw);
+
+        $this->assertSame(['Set-Cookie', 'X-One'], array_keys($result), 'the first spelling seen is the key');
+        $this->assertSame(['a=1', 'b=2', 'c=3'], $result['Set-Cookie']);
+    }
 }

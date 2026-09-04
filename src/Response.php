@@ -136,16 +136,10 @@ class Response
      */
     public function header(string $name, ?string $default = null): ?string
     {
-        foreach ($this->headers as $key => $values) {
-            if (strcasecmp($key, $name) === 0) {
-                // A present-but-empty value list means the same as absent to a
-                // caller asking for one value. The parser never produces one,
-                // but the constructor is public.
-                return $values[0] ?? $default;
-            }
-        }
-
-        return $default;
+        // A present-but-empty value list means the same as absent to a caller
+        // asking for one value. The parser never produces one, but the
+        // constructor is public.
+        return $this->headerAll($name)[0] ?? $default;
     }
 
     /**
@@ -160,13 +154,18 @@ class Response
      */
     public function headerAll(string $name): array
     {
+        // Every key that is this field, not just the first: the parser folds
+        // spellings that differ only in case into one key, but the constructor
+        // is public and a hand-built map may not have.
+        $all = [];
+
         foreach ($this->headers as $key => $values) {
             if (strcasecmp($key, $name) === 0) {
-                return $values;
+                $all = array_merge($all, $values);
             }
         }
 
-        return [];
+        return $all;
     }
 
     /**
@@ -273,7 +272,7 @@ class Response
     /**
      * Serialise the response to a plain array.
      *
-     * @return array{body: string, statusCode: int, headers: array<string, string[]>}
+     * @return array{body: string, statusCode: int, headers: array<string, string[]>, effectiveUrl: string|null, setCookieHeaders: list<string>}
      */
     public function toArray(): array
     {
@@ -281,6 +280,11 @@ class Response
             'body' => $this->body,
             'statusCode' => $this->statusCode,
             'headers' => $this->headers,
+            // The two fields a caller persisting a response needs most —
+            // where it came from and the cookies set along the way — were
+            // the two this dropped.
+            'effectiveUrl' => $this->effectiveUrl,
+            'setCookieHeaders' => $this->setCookieHeaders,
         ];
     }
 }

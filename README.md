@@ -281,7 +281,7 @@ Every request returns a `Response`:
 | `headers()` | `array<string, string[]>` | All headers as name → list of values |
 | `effectiveUrl()` | `?string` | The URL the transfer ended on, after redirects |
 | `setCookieHeaders()` | `string[]` | Every `Set-Cookie` from every hop (see [Cookies](#cookies)) |
-| `toArray()` | `array` | `['body' => …, 'statusCode' => …, 'headers' => …]` |
+| `toArray()` | `array` | `['body' => …, 'statusCode' => …, 'headers' => …, 'effectiveUrl' => …, 'setCookieHeaders' => …]` |
 | `dump()` | `string` | Human-readable summary (for logging) |
 | `debug()` | `self` | Echo `dump()` and return `$this` |
 
@@ -447,8 +447,8 @@ $response = $client->sendGet('https://api.ipify.org?format=json');
 | `referer` | string | `Referer` header value |
 | `cacert` | string | Path to a custom CA bundle file |
 | `capath` | string | Path to a custom CA directory |
-| `max-redirs` | int | Maximum redirects to follow (default 50) |
-| `max-filesize` | int | Largest response body accepted, in bytes (default 256 MiB); a larger one throws `RequestException` with code 63 |
+| `max-redirs` | int ≥ 0 | Maximum redirects to follow (default 50); `0` stops at the first response |
+| `max-filesize` | int ≥ 0 | Largest response body accepted, in bytes (default 256 MiB); a larger one throws `RequestException` with code 63. `0` removes the cap; a negative value is rejected |
 | `insecure` | bool | Skip TLS certificate verification (use with care) |
 
 > [!NOTE]

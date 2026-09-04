@@ -263,7 +263,9 @@ final class RequestPreparer
      */
     public static function headerLine(string $name, string $value): string
     {
-        return $value === '' ? "$name;" : "$name: $value";
+        // Whitespace-only counts as empty: libcurl trims the value and treats
+        // what is left — nothing — as a removal.
+        return trim($value, " \t") === '' ? "$name;" : "$name: $value";
     }
 
     /**
@@ -436,7 +438,13 @@ final class RequestPreparer
                 }
 
                 $name = $key;
-                $value = (string) $value;
+                // Optional whitespace around a field value is not part of it
+                // (RFC 9110 §5.5), and the list form above already trims it.
+                // Left in place, a value of ' ' rendered as `Name:  `, which
+                // libcurl reads as "remove this header" — and removed the
+                // profile's own header of that name from the fingerprint, the
+                // exact failure headerLine() guards against for ''.
+                $value = trim((string) $value, " \t");
             }
 
             // Keep the first spelling's position and casing, let the last value

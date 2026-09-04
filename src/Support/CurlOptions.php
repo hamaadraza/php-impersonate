@@ -169,9 +169,18 @@ final class CurlOptions
                 continue;
             }
 
-            if (self::type($key) === self::TYPE_LONG && ! is_numeric($value)) {
+            // A whole number, zero or more. is_numeric() alone let -1 through,
+            // and -1 is libcurl's "unlimited" for max-redirs, while for
+            // max-filesize a negative was rejected by libcurl with an unchecked
+            // return code and the cap the engine had just skipped stayed off:
+            // either way a documented safety default vanished without a word.
+            // 0 is allowed because it means something on both: max-redirs 0
+            // stops at the first response, and max-filesize 0 is curl's own
+            // spelling for "no cap" — explicit, which is the point.
+            if (self::type($key) === self::TYPE_LONG
+                && (filter_var($value, FILTER_VALIDATE_INT) === false || (int) $value < 0)) {
                 throw new InvalidArgumentException(sprintf(
-                    'Invalid value for curl option "%s": expected a number, %s given.',
+                    'Invalid value for curl option "%s": expected a whole number of 0 or more, %s given.',
                     $key,
                     var_export($value, true)
                 ));

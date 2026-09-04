@@ -469,4 +469,28 @@ class ResponseTest extends TestCase
         $this->assertSame($response, $returned);
         $this->assertStringContainsString('HTTP Status: 200', $output);
     }
+
+    /**
+     * The constructor is public, so a hand-built map can still carry two
+     * spellings of one name; the lookups must read all of them.
+     */
+    public function testLookupsMergeKeysThatDifferOnlyInCase(): void
+    {
+        $response = new Response('', 200, ['Set-Cookie' => ['a=1'], 'set-cookie' => ['b=2']]);
+
+        $this->assertSame(['a=1', 'b=2'], $response->headerAll('SET-COOKIE'));
+        $this->assertSame('a=1', $response->header('set-cookie'));
+        $this->assertTrue($response->hasHeader('Set-Cookie'));
+    }
+
+    public function testToArrayCarriesTheEffectiveUrlAndTheRedirectChainCookies(): void
+    {
+        $response = new Response('body', 200, ['X-Foo' => ['bar']], ['s=1', 't=2'], 'https://example.com/final');
+
+        $array = $response->toArray();
+
+        $this->assertSame('https://example.com/final', $array['effectiveUrl']);
+        $this->assertSame(['s=1', 't=2'], $array['setCookieHeaders']);
+        $this->assertSame(['body', 'statusCode', 'headers', 'effectiveUrl', 'setCookieHeaders'], array_keys($array));
+    }
 }

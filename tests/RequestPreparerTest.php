@@ -430,4 +430,25 @@ class RequestPreparerTest extends TestCase
         RequestPreparer::assertHeaderIsSafe("!#$%&'*+-.^_`|~09AZaz", "caf\xc3\xa9 \"quoted\" (parens)");
         $this->addToAssertionCount(2);
     }
+
+    /**
+     * A whitespace-only value rendered as `Name:  `, which libcurl reads as
+     * "remove this header" — and removed the profile's header of that name
+     * from the fingerprint, the failure the '' guard already prevented.
+     */
+    public function testWhitespaceOnlyValueIsSentAsAnEmptyHeaderNotARemoval(): void
+    {
+        $this->assertSame('X-Blank;', RequestPreparer::headerLine('X-Blank', ' '));
+        $this->assertSame('X-Blank;', RequestPreparer::headerLine('X-Blank', "\t"));
+        $this->assertSame('X-Blank;', RequestPreparer::headerLine('X-Blank', ''));
+        $this->assertSame('X-Real: v', RequestPreparer::headerLine('X-Real', 'v'));
+    }
+
+    public function testOptionalWhitespaceAroundAMapFormValueIsTrimmedLikeTheListForm(): void
+    {
+        $this->assertSame(
+            ['X-Map' => 'v', 'X-List' => 'w', 'X-Blank' => ''],
+            RequestPreparer::normalizeHeaders(['X-Map' => "  v\t", 'X-List:   w  ', 'X-Blank' => '   '])
+        );
+    }
 }

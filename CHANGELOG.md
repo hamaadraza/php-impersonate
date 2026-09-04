@@ -2,11 +2,11 @@
 
 All notable changes to `php-impersonate` will be documented in this file.
 
+## Unreleased
+
 ## v2.0.0 - 2026-09-04
 
 **Full Changelog**: https://github.com/hamaadraza/php-impersonate/compare/v1.0.9...v2.0.0
-
-## Unreleased
 
 ### Breaking changes
 

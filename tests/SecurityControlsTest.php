@@ -7,11 +7,13 @@ namespace Raza\PHPImpersonate\Tests;
 use ReflectionClass;
 use ReflectionMethod;
 use PHPUnit\Framework\TestCase;
+use Raza\PHPImpersonate\PHPImpersonate;
 use Raza\PHPImpersonate\Browser\Browser;
 use Raza\PHPImpersonate\Process\CurlProcess;
 use Raza\PHPImpersonate\Config\Configuration;
 use PHPUnit\Framework\Attributes\DataProvider;
 use Raza\PHPImpersonate\Platform\PlatformDetector;
+use Raza\PHPImpersonate\Exception\RequestException;
 
 /**
  * The guards that only matter when something has already gone wrong.
@@ -85,6 +87,75 @@ class SecurityControlsTest extends TestCase
                 'curl --proxy *** --max-time 30',
             ],
         ];
+    }
+
+    /**
+     * The URL line curl's write-out echoes on stdout, which a failed
+     * transfer's RequestException quotes.
+     */
+    #[DataProvider('urlRedactionProvider')]
+    public function testUrlRedaction(string $line, string $expected): void
+    {
+        $redact = (new ReflectionClass(CurlProcess::class))->getMethod('redactUrl');
+
+        $this->assertSame($expected, $redact->invoke(null, $line));
+    }
+
+    /**
+     * @return array<string, array{0: string, 1: string}>
+     */
+    public static function urlRedactionProvider(): array
+    {
+        return [
+            'userinfo and query on the write-out line' => [
+                'http://user:secretpw@127.0.0.1:1/?token=abc',
+                'http://***@127.0.0.1:1/?***',
+            ],
+            'userinfo alone' => [
+                'https://token@example.com/path',
+                'https://***@example.com/path',
+            ],
+            'query alone' => [
+                'https://example.com/search?q=x&api_key=k',
+                'https://example.com/search?***',
+            ],
+            'an @ inside the query is not userinfo' => [
+                'https://example.com/?to=a@b',
+                'https://example.com/?***',
+            ],
+            // Scheme, host and path survive: the log must still say which request failed.
+            'a plain URL is untouched' => [
+                'https://example.com/a/b',
+                'https://example.com/a/b',
+            ],
+            'the status line is untouched' => ['000', '000'],
+            'a curl stderr line is untouched' => [
+                'curl: (5) Could not resolve proxy: nonexistent.invalid',
+                'curl: (5) Could not resolve proxy: nonexistent.invalid',
+            ],
+        ];
+    }
+
+    /**
+     * End to end, because the argv mask alone passed while the write-out on
+     * stdout carried the same secret into the exception. A proxy that cannot
+     * be resolved fails every transfer before a packet leaves, on any host.
+     */
+    public function testAFailedRequestDoesNotQuoteTheUrlsCredentials(): void
+    {
+        $client = new PHPImpersonate('chrome146', 5, ['proxy' => 'http://nonexistent.invalid:1'], PHPImpersonate::ENGINE_PROCESS);
+
+        try {
+            $client->sendGet('http://user:secretpw@127.0.0.1:1/?token=abc');
+            $this->fail('a request through an unresolvable proxy must fail');
+        } catch (RequestException $e) {
+            $everything = $e->getMessage() . "\n" . ($e->getCommand() ?? '') . "\n" . implode("\n", $e->getOutput());
+
+            $this->assertStringNotContainsString('secretpw', $everything);
+            $this->assertStringNotContainsString('token=abc', $everything);
+            // …while the host is still named, so the failure can be traced.
+            $this->assertStringContainsString('127.0.0.1', $everything);
+        }
     }
 
     /**

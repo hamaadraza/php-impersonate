@@ -900,6 +900,29 @@ final class CurlProcess
     }
 
     /**
+     * Mask what a URL may carry that must not reach a log: `user:secret@`
+     * userinfo, and the query string.
+     *
+     * The URL never enters argv (it travels in the --config file), but the
+     * `%{url_effective}` write-out prints it back on stdout, and stdout is
+     * what a failed transfer's RequestException quotes. So the secret that
+     * redactCommand() kept out of the argv still surfaced there verbatim, on
+     * every DNS, proxy, TLS or timeout failure. The query string goes too:
+     * `?token=…` is as much a credential as userinfo, and the exception has no
+     * use for it — scheme, host and path are enough to say which request failed.
+     */
+    private static function redactUrl(string $line): string
+    {
+        $line = preg_replace('#([a-zA-Z][\w+.-]*://)[^/@\s]+@#', '$1***@', $line) ?? $line;
+
+        if (preg_match('#^[a-zA-Z][\w+.-]*://#', $line) === 1) {
+            $line = preg_replace('#\?.*$#s', '?***', $line) ?? $line;
+        }
+
+        return $line;
+    }
+
+    /**
      * @param resource $process
      * @param array<int,resource> $pipes
      */
@@ -971,7 +994,9 @@ final class CurlProcess
             : ($exitCode !== 0 && $exitCode !== self::CURL_EXIT_TOO_MANY_REDIRECTS);
 
         if ($failed) {
-            $allOutput = array_merge($outputLines, $errorLines);
+            // Line by line, because the write-out echoes the URL curl was given
+            // (see redactUrl()) and this message is what reaches the logs.
+            $allOutput = array_map(self::redactUrl(...), array_merge($outputLines, $errorLines));
             $errorMessage = implode("\n", $allOutput);
 
             throw new RequestException(

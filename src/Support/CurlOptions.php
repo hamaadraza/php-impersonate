@@ -49,6 +49,13 @@ final class CurlOptions
      * the executable engine filled the temp directory instead. A finite default
      * turns that into a RequestException (curl error 63) instead of an OOM kill
      * or a full disk. curl also enforces it on chunked, unknown-length bodies.
+     *
+     * The FFI engine's buffer has since moved into a PHP string, which
+     * memory_limit does see — and this cap is larger than PHP's default
+     * memory_limit, so it cannot by itself keep a body from exhausting it.
+     * That engine therefore also budgets the body against memory_limit per
+     * request and stops the transfer with the same error code (63) when the
+     * body would not fit; see CurlImpersonate::bodyBudget().
      */
     public const DEFAULT_MAX_FILESIZE = 268435456; // 256 MiB
 

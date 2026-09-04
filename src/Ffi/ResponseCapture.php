@@ -27,6 +27,13 @@ final class ResponseCapture
     /** An exception raised inside a callback, to be rethrown once libcurl returns. */
     public ?\Throwable $error = null;
 
+    /**
+     * The most body bytes the write callback may accumulate for the current
+     * request; set by the engine before each transfer from memory_limit.
+     * Not touched by reset(): it describes the next request, not the last.
+     */
+    public int $budget = PHP_INT_MAX;
+
     public function reset(): void
     {
         $this->body = '';

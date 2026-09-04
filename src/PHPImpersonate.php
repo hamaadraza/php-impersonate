@@ -162,11 +162,11 @@ class PHPImpersonate implements ClientInterface
     public static function ffiAvailable(): bool
     {
         if (! CurlImpersonate::isSupported()) {
-            self::$ffiUnavailableReason = PlatformDetector::isWindows()
-                ? 'No libcurl-impersonate shared library is shipped for Windows.'
-                : (extension_loaded('FFI')
-                    ? sprintf('The ffi extension is loaded but ffi.enable=%s does not permit it in the %s SAPI.', (string) ini_get('ffi.enable'), PHP_SAPI)
-                    : 'The ffi extension is not loaded.');
+            // Windows is no special case: the DLL is bundled, so an unusable
+            // engine there means what it means everywhere — the extension.
+            self::$ffiUnavailableReason = extension_loaded('FFI')
+                ? sprintf('The ffi extension is loaded but ffi.enable=%s does not permit it in the %s SAPI.', (string) ini_get('ffi.enable'), PHP_SAPI)
+                : 'The ffi extension is not loaded.';
 
             return false;
         }
@@ -678,9 +678,12 @@ class PHPImpersonate implements ClientInterface
 
             case self::ENGINE_FFI:
                 if (! self::ffiAvailable()) {
+                    // The probe already knows exactly why; a fixed message hid
+                    // it (a library that loaded but reached a foreign libcurl
+                    // is not "disabled or missing").
                     throw new RequestException(
-                        'The FFI engine was requested but is not available '
-                        . '(the ffi extension is disabled or the shared library is missing).'
+                        'The FFI engine was requested but is not available: '
+                        . (self::$ffiUnavailableReason ?? 'the ffi extension is disabled or the shared library is missing.')
                     );
                 }
 

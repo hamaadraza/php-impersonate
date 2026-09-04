@@ -64,6 +64,7 @@ final class CurlImpersonate
     private const CURLE_OK = 0;
     private const CURLE_TOO_MANY_REDIRECTS = 47;
     private const CURLE_UNKNOWN_OPTION = 48;
+    private const CURLE_FILESIZE_EXCEEDED = 63;
 
     /** Match the curl command-line tool's default redirect cap (the executable engine). */
     private const MAX_REDIRECTS = 50;
@@ -183,6 +184,17 @@ final class CurlImpersonate
      * They live for the rest of the process, so capturing an engine would pin
      * that engine, its curl handle and its kept-alive connections forever.
      *
+     * The body callback also enforces a byte budget (see bodyBudget()). The
+     * try/catch cannot catch the one failure that matters most here: running
+     * past memory_limit inside the callback is a fatal error, and it unwinds
+     * straight through libcurl's C frames — a bare 500 in FPM, a dead queue
+     * worker elsewhere, and no exception for the caller. `max-filesize` does
+     * not prevent it either: its default (256 MiB) is above PHP's default
+     * memory_limit (128M), so with stock settings any body between roughly
+     * 60 MB and 256 MB was fatal. Refusing the chunk that would cross the
+     * budget makes curl stop with a write error, which the engine then throws
+     * as it does for any other callback failure.
+     *
      * @return array{ffi: FFI, capture: ResponseCapture, body: \FFI\CData, header: \FFI\CData}
      */
     private static function sharedSinks(string $libPath, FFI $ffi): array
@@ -199,6 +211,17 @@ final class CurlImpersonate
 
             try {
                 if ($length > 0) {
+                    $buffered = strlen($capture->body);
+                    if ($buffered + $length > $capture->budget) {
+                        throw new RequestException(sprintf(
+                            'the response body does not fit in memory: %d bytes buffered, %d more arrived, '
+                            . '%d permitted with memory_limit=%s (raise memory_limit, or set a lower `max-filesize`)',
+                            $buffered,
+                            $length,
+                            $capture->budget,
+                            (string) ini_get('memory_limit')
+                        ), self::CURLE_FILESIZE_EXCEEDED);
+                    }
                     $capture->body .= FFI::string($ptr, $length);
                 }
 
@@ -235,6 +258,51 @@ final class CurlImpersonate
             'body' => $body,
             'header' => $header,
         ];
+    }
+
+    /**
+     * How many body bytes this request may buffer before the write callback
+     * refuses the next chunk.
+     *
+     * Appending to a PHP string can briefly hold the old and the new copy at
+     * once, so the body may take at most half of what memory_limit leaves
+     * free, less a margin for the headers, the chunk being appended and
+     * whatever else the request allocates. No limit means no budget.
+     */
+    private static function bodyBudget(): int
+    {
+        $limit = self::memoryLimitBytes();
+        if ($limit <= 0) {
+            return PHP_INT_MAX;
+        }
+
+        $free = $limit - memory_get_usage(true);
+        if ($free <= 0) {
+            return 0;
+        }
+
+        return max(intdiv($free, 4), intdiv($free, 2) - 3 * 1024 * 1024);
+    }
+
+    /**
+     * memory_limit in bytes, or -1 when unlimited. Same shorthand PHP accepts
+     * for the setting itself (`128M`, `1G`, `262144`).
+     */
+    private static function memoryLimitBytes(): int
+    {
+        $raw = trim((string) ini_get('memory_limit'));
+        if ($raw === '' || $raw === '-1') {
+            return -1;
+        }
+
+        $number = (int) $raw;
+
+        return match (strtolower(substr($raw, -1))) {
+            'g' => $number << 30,
+            'm' => $number << 20,
+            'k' => $number << 10,
+            default => $number,
+        };
     }
 
     public function __destruct()
@@ -414,6 +482,8 @@ final class CurlImpersonate
         // is per request, and it is emptied at both ends of one.
         $capture = $this->capture;
         $capture->reset();
+        // Per request, because memory_limit and current usage both move.
+        $capture->budget = self::bodyBudget();
 
         $slist = null;
 
@@ -493,10 +563,16 @@ final class CurlImpersonate
             $rc = $ffi->curl_easy_perform($h);
 
             if ($capture->error !== null) {
+                $inner = $capture->error;
+
                 throw new RequestException(
-                    'libcurl-impersonate: failed while receiving the response: ' . $capture->error->getMessage(),
-                    $rc,
-                    $capture->error
+                    'libcurl-impersonate: failed while receiving the response: ' . $inner->getMessage(),
+                    // The budget abort carries curl's own "too large" code so
+                    // callers see one code for an oversized body on both
+                    // engines, whichever cap stopped it; anything else keeps
+                    // the write error curl reported.
+                    $inner instanceof RequestException && $inner->getCode() !== 0 ? $inner->getCode() : $rc,
+                    $inner
                 );
             }
 

@@ -200,20 +200,24 @@ final class BinaryInstaller
                 throw new \RuntimeException("Cannot create $destDir");
             }
             $dest = $destDir . '/' . $spec['dest'];
-
-            if (! copy($binaryPath, $dest)) {
-                throw new \RuntimeException("Failed to copy binary into $dest");
-            }
-            if ($spec['executable']) {
-                @chmod($dest, 0755);
-            }
-
-            $this->stripSymbols($dest, $dir);
-
-            // Checked AFTER stripping, because stripping is what the committed
-            // digest was taken over.
             $relPath = $dir . '/' . $spec['dest'];
-            $this->assertMatchesManifest($manifest, $relPath, $dest);
+
+            // Staged, stripped and checked inside the work dir, and only then
+            // moved into bin/. Checking after the copy left a rejected download
+            // sitting at its final path — where the next run found it "already
+            // installed" and used it — so the pin produced one error message
+            // and no protection.
+            $staged = $work . '/' . $spec['dest'];
+            if (! copy($binaryPath, $staged)) {
+                throw new \RuntimeException("Failed to stage binary from $asset");
+            }
+
+            // Stripped BEFORE the check, because stripping is what the
+            // committed digest was taken over.
+            $this->stripSymbols($staged, $dir);
+            $this->assertMatchesManifest($manifest, $relPath, $staged);
+
+            $this->moveIntoPlace($staged, $dest, $spec['executable'] ? 0755 : 0644);
 
             $verified = false;
             $note = 'installed';
@@ -225,6 +229,9 @@ final class BinaryInstaller
             if ($this->isHostPlatform($dir)) {
                 $verified = $this->verify($dest);
                 if (! $verified) {
+                    // Not left behind for the same reason as a checksum mismatch.
+                    @unlink($dest);
+
                     throw new \RuntimeException("Installed binary failed --version IMPERSONATE check: $dest");
                 }
                 $note = 'installed + verified (' . $this->versionString($dest) . ')';
@@ -367,15 +374,18 @@ final class BinaryInstaller
                 throw new \RuntimeException("Cannot create $destDir");
             }
             $dest = $destDir . '/' . $this->libDestName($dir);
-            if (! copy($lib, $dest)) {
-                throw new \RuntimeException("Failed to copy library into $dest");
-            }
-            @chmod($dest, 0644);
-
-            $this->stripSymbols($dest, $dir);
-
             $relPath = $dir . '/' . $this->libDestName($dir);
-            $this->assertMatchesManifest($manifest, $relPath, $dest);
+
+            // Same order as install(): stage, strip, check, and only then move.
+            $staged = $work . '/' . $this->libDestName($dir);
+            if (! copy($lib, $staged)) {
+                throw new \RuntimeException("Failed to stage library from $asset");
+            }
+
+            $this->stripSymbols($staged, $dir);
+            $this->assertMatchesManifest($manifest, $relPath, $staged);
+
+            $this->moveIntoPlace($staged, $dest, 0644);
 
             return [
                 'message' => 'library installed (' . $this->humanSize(filesize($dest) ?: 0) . ')',
@@ -447,6 +457,21 @@ final class BinaryInstaller
 
         $flag = str_starts_with($dir, 'macos') ? ' -x ' : ' --strip-unneeded ';
         @exec(escapeshellarg($strip) . $flag . escapeshellarg($path) . ' 2>' . Http::nullDevice());
+    }
+
+    /**
+     * Move a verified artifact from the work dir to its final path.
+     *
+     * rename() copies and unlinks by itself when the temp dir is on another
+     * filesystem, and replaces an existing file on every platform. The mode
+     * is applied afterwards because that copy fallback need not preserve it.
+     */
+    private function moveIntoPlace(string $staged, string $dest, int $mode): void
+    {
+        if (! rename($staged, $dest)) {
+            throw new \RuntimeException("Failed to move the verified artifact into $dest");
+        }
+        @chmod($dest, $mode);
     }
 
     private function humanSize(int $bytes): string

@@ -109,6 +109,53 @@ class PlatformTest extends TestCase
     }
 
     /**
+     * The libc is read from what the running process has MAPPED, not from
+     * which loader files exist on disk: a glibc host with the `musl` package
+     * installed (musl-tools, common on CI images) has /lib/ld-musl-x86_64.so.1
+     * and used to be detected as musl, so the musl build of the shared library
+     * was dlopen'ed into a glibc process.
+     */
+    public function testLibcIsReadFromTheProcessMemoryMap(): void
+    {
+        $probe = new \ReflectionMethod(PlatformDetector::class, 'libcFromMaps');
+
+        $glibc = "7f1a0000-7f1a1000 r--p 00000000 fd:01 1234 /usr/lib/x86_64-linux-gnu/libc.so.6\n"
+            . "7f1b0000-7f1b1000 r--p 00000000 fd:01 1235 /usr/lib/x86_64-linux-gnu/ld-linux-x86-64.so.2\n";
+        $musl = "7f1a0000-7f1a1000 r--p 00000000 fd:01 1234 /lib/ld-musl-x86_64.so.1\n";
+        $muslViaSymlink = "7f1a0000-7f1a1000 r--p 00000000 fd:01 1234 /lib/libc.musl-aarch64.so.1\n";
+        $static = "00400000-00401000 r--p 00000000 fd:01 1234 /usr/local/bin/php\n";
+
+        $this->assertSame(PlatformDetector::LIBC_GNU, $probe->invoke(null, $glibc));
+        $this->assertSame(PlatformDetector::LIBC_MUSL, $probe->invoke(null, $musl));
+        $this->assertSame(PlatformDetector::LIBC_MUSL, $probe->invoke(null, $muslViaSymlink));
+        $this->assertNull($probe->invoke(null, $static), 'a statically linked php names no libc');
+        $this->assertNull($probe->invoke(null, ''));
+
+        // A musl loader merely PRESENT on disk is not what the process runs on.
+        $glibcWithMuslInstalled = $glibc . "7f1c0000-7f1c1000 r--p 00000000 fd:01 1236 /usr/lib/x86_64-linux-gnu/libm.so.6\n";
+        $this->assertSame(PlatformDetector::LIBC_GNU, $probe->invoke(null, $glibcWithMuslInstalled));
+    }
+
+    /**
+     * On a real Linux the memory-map answer and the public answer agree.
+     */
+    public function testTheMemoryMapAgreesWithTheDetectedLibc(): void
+    {
+        if (! PlatformDetector::isLinux() || ! is_readable('/proc/self/maps')) {
+            $this->markTestSkipped('needs a Linux /proc');
+        }
+
+        $probe = new \ReflectionMethod(PlatformDetector::class, 'libcFromMaps');
+        $fromMaps = $probe->invoke(null, (string) file_get_contents('/proc/self/maps'));
+
+        if ($fromMaps === null) {
+            $this->markTestSkipped('this php maps no libc (static build)');
+        }
+
+        $this->assertSame($fromMaps, PlatformDetector::getLibcType());
+    }
+
+    /**
      * Test libc type detection on Linux
      */
     public function testLibcTypeDetection()

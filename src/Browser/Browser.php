@@ -4,9 +4,10 @@ declare(strict_types=1);
 
 namespace Raza\PHPImpersonate\Browser;
 
-use RuntimeException;
 use Raza\PHPImpersonate\Config\Configuration;
 use Raza\PHPImpersonate\Platform\PlatformDetector;
+use Raza\PHPImpersonate\Exception\RequestException;
+use Raza\PHPImpersonate\Exception\InvalidArgumentException;
 
 class Browser implements BrowserInterface
 {
@@ -26,7 +27,8 @@ class Browser implements BrowserInterface
 
     /**
      * @param string $name Browser name (e.g., 'chrome99_android')
-     * @throws RuntimeException If the browser is not found
+     * @throws InvalidArgumentException If the browser name is unknown
+     * @throws RequestException If no usable curl-impersonate binary can be found
      */
     public function __construct(private string $name)
     {
@@ -52,14 +54,18 @@ class Browser implements BrowserInterface
     /**
      * Validate that the browser configuration exists
      *
-     * @throws RuntimeException If the browser is not supported
+     * @throws InvalidArgumentException If the browser is not supported — a
+     *   caller mistake, and the same type BrowserConfig::getConfig() throws
+     *   for it. It was a bare \RuntimeException, outside the library's
+     *   PHPImpersonateException marker, so "one catch covers everything" did
+     *   not hold for `new Browser('typo')`.
      */
     private function validateBrowser(): void
     {
         if (! BrowserConfig::hasConfig($this->name)) {
             $availableBrowsers = BrowserConfig::getAvailableBrowsers();
 
-            throw new RuntimeException(sprintf(
+            throw new InvalidArgumentException(sprintf(
                 "Browser '%s' not supported. Available browsers: %s",
                 $this->name,
                 implode(', ', $availableBrowsers)
@@ -72,7 +78,10 @@ class Browser implements BrowserInterface
     /**
      * Resolve the executable path for the curl-impersonate binary
      *
-     * @throws RuntimeException If the binary is not found
+     * @throws RequestException If the binary is not found or cannot be run —
+     *   an environment failure, which is what RequestException stands for
+     *   ("a non-loadable library" in the README), and it still extends
+     *   \RuntimeException for anyone catching that.
      */
     private function resolveExecutablePath(): void
     {
@@ -81,7 +90,7 @@ class Browser implements BrowserInterface
         // resolution — and rather than with the bare \Error PHP raises for a
         // name in disable_functions.
         if (! function_exists('proc_open')) {
-            throw new RuntimeException(
+            throw new RequestException(
                 'The executable engine needs proc_open(), which this host disables '
                 . '(see the disable_functions ini setting). Enable it, or use the FFI engine, which spawns no process.'
             );
@@ -132,8 +141,7 @@ class Browser implements BrowserInterface
 
         $checked = array_merge($this->getBundledPaths($binaryFile), $paths);
 
-
-        throw new RuntimeException(sprintf(
+        throw new RequestException(sprintf(
             "curl-impersonate binary not found for %s. This platform is not bundled; "
             . "run `php vendor/hamaadraza/php-impersonate/bin/php-impersonate-install` "
             . "(or `composer install-binaries` from this package) to download it. Checked paths: %s",

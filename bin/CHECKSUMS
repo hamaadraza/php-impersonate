@@ -1,12 +1,25 @@
-# sha256 digests of the bundled curl-impersonate artifacts.
-# Written by scripts/update-binaries.php; verified by bin/php-impersonate-install.
-# Upstream ships no checksums, so these are a trust-on-first-use pin.
+# sha256 digests of the curl-impersonate artifacts this package installs, for
+# every platform — bundled or fetched on demand by bin/php-impersonate-install,
+# which verifies a download against this file before installing it.
+#
+# Each digest is of the file INSIDE the upstream release archive, exactly as
+# published (the "member" lines of bin/UPSTREAM-CHECKSUMS), so it is the same
+# on every host and can be compared with the upstream release. The committed
+# Linux files are stripped afterwards and hash differently; their as-committed
+# digests are the "reproduced" lines of bin/UPSTREAM-CHECKSUMS.
+# Written by scripts/update-binaries.php and scripts/record-upstream-checksums.php.
 # Last updated for release: v2.1.1
+67a163b257b37f0a6f599ba99632b8d36a21ed8c807a37466423fae1dd13ca2b  linux-aarch64-musl/curl-impersonate
+a522e88dce411680c66aa72b0dae58f15d1d963068fe18464e340b7291be95fd  linux-aarch64-musl/libcurl-impersonate.so
+0ebdc4c4d53ce99225a07d7ec33fddef2ef7e3325f41672afba6a5e176a8fe34  linux-aarch64/curl-impersonate
+9aa7b93357fd69f2693fd566db2fdb81654814425e0abf79e6abee33064702a1  linux-aarch64/libcurl-impersonate.so
 bd1e54325761d295cd751a7203e65234ea7a4b9016c59b78350f3a7d95286e04  linux-x86_64-musl/curl-impersonate
 c968959b66959df15c2dd6afe75c8538ebae26a40b0ea373f86915a832ad593a  linux-x86_64-musl/libcurl-impersonate.so
-940259209cff750878cead7254cf2d2bb45fd2e1feb4d7c8341c77a60e5070cd  linux-x86_64/curl-impersonate
-d042c782883ac6f3f9f2bf24267de3a5c8ea4bf3a8a0adfee069ee8bcb4d34ad  linux-x86_64/libcurl-impersonate.so
+baa52d0ae090e9e330377294414c037696bd3c08452a0b67a8f5fe665977de6c  linux-x86_64/curl-impersonate
+803a80e7af47af41afbe10763d6365fc323c6e65a0bdeb2fcc3af0225e78e4cd  linux-x86_64/libcurl-impersonate.so
 a6a679655b888393eb7e9edaeda7507f5a43eef1f87c6d2660d6826dcf17cb89  macos-aarch64/curl-impersonate
 7f62b2feeed8f090b4c1659069f75fff6c289f97ccac2f76642c2566c926be36  macos-aarch64/libcurl-impersonate.dylib
+ee5cc713e865d9d0b2154fc6bbe6b9c00a0ed023703e3667118d870dd7989bd8  macos-x86_64/curl-impersonate
+863bef6389388a287a43c9a6339773fe3cc1369f874cb00e3fcdb95d11301d97  macos-x86_64/libcurl-impersonate.dylib
 dcaf8ef7c402adf802c25ee89f5ab6d4c289f3a309ef1cd99b83ed735a0f503f  windows-x86_64/curl.exe
 70adc4d9b16b25ba6b7778922d84043b479dc168caf5f43837f48d4294aae751  windows-x86_64/libcurl-impersonate.dll

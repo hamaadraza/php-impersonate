@@ -88,9 +88,16 @@ final class BinaryInstaller
         ksort($all);
 
         $lines = [
-            '# sha256 digests of the bundled curl-impersonate artifacts.',
-            '# Written by scripts/update-binaries.php; verified by bin/php-impersonate-install.',
-            '# Upstream ships no checksums, so these are a trust-on-first-use pin.',
+            '# sha256 digests of the curl-impersonate artifacts this package installs, for',
+            '# every platform — bundled or fetched on demand by bin/php-impersonate-install,',
+            '# which verifies a download against this file before installing it.',
+            '#',
+            '# Each digest is of the file INSIDE the upstream release archive, exactly as',
+            '# published (the "member" lines of bin/UPSTREAM-CHECKSUMS), so it is the same',
+            '# on every host and can be compared with the upstream release. The committed',
+            '# Linux files are stripped afterwards and hash differently; their as-committed',
+            '# digests are the "reproduced" lines of bin/UPSTREAM-CHECKSUMS.',
+            '# Written by scripts/update-binaries.php and scripts/record-upstream-checksums.php.',
             '# Last updated for release: ' . $version,
         ];
         foreach ($all as $path => $hash) {
@@ -101,7 +108,8 @@ final class BinaryInstaller
     }
 
     /**
-     * Check a freshly installed artifact against the committed manifest.
+     * Check a downloaded artifact — the raw archive member, before any
+     * stripping — against the committed manifest.
      *
      * A path absent from the manifest is accepted — that is the maintainer
      * adding an artifact for the first time, and the digest is recorded on the
@@ -173,7 +181,10 @@ final class BinaryInstaller
      *
      * @param array{triple: string, member: string, dest: string, executable: bool} $spec
      * @param array<string, string> $manifest Committed digests to check against.
-     * @return array{message: string, verified: bool, path: string, sha256: string}
+     * @return array{message: string, verified: bool, path: string, sha256: string, installed_sha256: string}
+     *   `sha256` is the digest of the upstream archive member (what the
+     *   manifest pins); `installed_sha256` that of the file as placed, which
+     *   differs when the host stripped it.
      */
     public function install(string $version, string $dir, array $spec, array $manifest = []): array
     {
@@ -212,10 +223,16 @@ final class BinaryInstaller
                 throw new \RuntimeException("Failed to stage binary from $asset");
             }
 
-            // Stripped BEFORE the check, because stripping is what the
-            // committed digest was taken over.
-            $this->stripSymbols($staged, $dir);
+            // Checked BEFORE stripping. The manifest pins the archive member as
+            // upstream published it — the one digest that is the same on every
+            // host and that GitHub's release page can be compared with. A pin
+            // over the stripped file depended on whether the host had `strip`:
+            // recorded from a glibc box, the musl digests were of unstripped
+            // files, so an Alpine host with binutils mismatched and one
+            // without matched.
+            $memberHash = $this->sha256($staged);
             $this->assertMatchesManifest($manifest, $relPath, $staged);
+            $this->stripSymbols($staged, $dir);
 
             $this->moveIntoPlace($staged, $dest, $spec['executable'] ? 0755 : 0644);
 
@@ -241,7 +258,8 @@ final class BinaryInstaller
                 'message' => $note,
                 'verified' => $verified,
                 'path' => $relPath,
-                'sha256' => $this->sha256($dest),
+                'sha256' => $memberHash,
+                'installed_sha256' => $this->sha256($dest),
             ];
         } finally {
             $this->rmrf($work);
@@ -347,7 +365,7 @@ final class BinaryInstaller
      *
      * @param array{triple: string, member: string, dest: string, executable: bool} $spec
      * @param array<string, string> $manifest Committed digests to check against.
-     * @return array{message: string, path: string, sha256: string}
+     * @return array{message: string, path: string, sha256: string, installed_sha256: string}
      */
     public function installLib(string $version, string $dir, array $spec, array $manifest = []): array
     {
@@ -376,21 +394,24 @@ final class BinaryInstaller
             $dest = $destDir . '/' . $this->libDestName($dir);
             $relPath = $dir . '/' . $this->libDestName($dir);
 
-            // Same order as install(): stage, strip, check, and only then move.
+            // Same order as install(): stage, check the raw member, strip, and
+            // only then move.
             $staged = $work . '/' . $this->libDestName($dir);
             if (! copy($lib, $staged)) {
                 throw new \RuntimeException("Failed to stage library from $asset");
             }
 
-            $this->stripSymbols($staged, $dir);
+            $memberHash = $this->sha256($staged);
             $this->assertMatchesManifest($manifest, $relPath, $staged);
+            $this->stripSymbols($staged, $dir);
 
             $this->moveIntoPlace($staged, $dest, 0644);
 
             return [
                 'message' => 'library installed (' . $this->humanSize(filesize($dest) ?: 0) . ')',
                 'path' => $relPath,
-                'sha256' => $this->sha256($dest),
+                'sha256' => $memberHash,
+                'installed_sha256' => $this->sha256($dest),
             ];
         } finally {
             $this->rmrf($work);

@@ -1,12 +1,13 @@
 # sha256 of the UPSTREAM lexiforest/curl-impersonate release assets the bundled
 # artifacts were derived from, and of the raw member inside each archive.
-# Written by scripts/record-upstream-checksums.php. bin/CHECKSUMS records the
-# files as committed (stripped); this records what they came from, so a bundled
-# binary can be re-derived from upstream and checked:
+# Written by scripts/record-upstream-checksums.php. The member digests are what
+# bin/CHECKSUMS pins and bin/php-impersonate-install verifies; the reproduced
+# lines are the files as committed (stripped on Linux), so a bundled binary can
+# be re-derived from upstream and checked:
 #
 #   curl -sSLO https://github.com/lexiforest/curl-impersonate/releases/download/v2.1.1/<asset>
 #   tar -xzf <asset> && sha256sum <member>            # must equal the member digest
-#   strip --strip-unneeded <member> (Linux only)      # then must equal bin/CHECKSUMS
+#   strip --strip-unneeded <member> (Linux only)      # then must equal the reproduced line
 #
 # macOS and Windows artifacts are shipped exactly as upstream built them.
 # Release: v2.1.1
@@ -18,6 +19,24 @@ baa52d0ae090e9e330377294414c037696bd3c08452a0b67a8f5fe665977de6c  member  linux-
 18b22585da3d6a58926086c65b1e662a87768ccca646e8c2a6ed03137bf948f1  asset  libcurl-impersonate-v2.1.1.x86_64-linux-gnu.tar.gz
 803a80e7af47af41afbe10763d6365fc323c6e65a0bdeb2fcc3af0225e78e4cd  member  linux-x86_64/libcurl-impersonate.so
 d042c782883ac6f3f9f2bf24267de3a5c8ea4bf3a8a0adfee069ee8bcb4d34ad  reproduced=yes  linux-x86_64/libcurl-impersonate.so
+2a8ab716f220c1744e5b1b5471a667db1fd3c19b9210391265f6b25a57c3ef52  asset  curl-impersonate-v2.1.1.x86_64-linux-musl.tar.gz
+bd1e54325761d295cd751a7203e65234ea7a4b9016c59b78350f3a7d95286e04  member  linux-x86_64-musl/curl-impersonate
+bd1e54325761d295cd751a7203e65234ea7a4b9016c59b78350f3a7d95286e04  reproduced=yes  linux-x86_64-musl/curl-impersonate
+53ad7c50c39eaa1f083942ff23b8ba16b06003a7b78451a1228f3c912ddc8e44  asset  libcurl-impersonate-v2.1.1.x86_64-linux-musl.tar.gz
+c968959b66959df15c2dd6afe75c8538ebae26a40b0ea373f86915a832ad593a  member  linux-x86_64-musl/libcurl-impersonate.so
+c968959b66959df15c2dd6afe75c8538ebae26a40b0ea373f86915a832ad593a  reproduced=yes  linux-x86_64-musl/libcurl-impersonate.so
+69087a501ec2fb2111dc0af1df2d82c1bf7880b3bad5c1c90a0c62eba57c587e  asset  curl-impersonate-v2.1.1.aarch64-linux-gnu.tar.gz
+0ebdc4c4d53ce99225a07d7ec33fddef2ef7e3325f41672afba6a5e176a8fe34  member  linux-aarch64/curl-impersonate
+db437a38f5c694f43ae08619cb53e3ad5061b05f720f9e56ee68688c91442805  asset  libcurl-impersonate-v2.1.1.aarch64-linux-gnu.tar.gz
+9aa7b93357fd69f2693fd566db2fdb81654814425e0abf79e6abee33064702a1  member  linux-aarch64/libcurl-impersonate.so
+b220170f750f1d105aac697b50e97632f78b2258e57d579a28330900efbd6653  asset  curl-impersonate-v2.1.1.aarch64-linux-musl.tar.gz
+67a163b257b37f0a6f599ba99632b8d36a21ed8c807a37466423fae1dd13ca2b  member  linux-aarch64-musl/curl-impersonate
+dfb12a0db81556c92dcaec1e172b1de77fe2e613de0b81ff20213b5fb72cfd59  asset  libcurl-impersonate-v2.1.1.aarch64-linux-musl.tar.gz
+a522e88dce411680c66aa72b0dae58f15d1d963068fe18464e340b7291be95fd  member  linux-aarch64-musl/libcurl-impersonate.so
+db2cd649164bd5639e9314c127f6ffcac2cb70a53d65987092488d9f616943ac  asset  curl-impersonate-v2.1.1.x86_64-macos.tar.gz
+ee5cc713e865d9d0b2154fc6bbe6b9c00a0ed023703e3667118d870dd7989bd8  member  macos-x86_64/curl-impersonate
+5d3e3ab29416d52292331fd830c7cb0faa570cf606f3b38900cac844d6dc4f26  asset  libcurl-impersonate-v2.1.1.x86_64-macos.tar.gz
+863bef6389388a287a43c9a6339773fe3cc1369f874cb00e3fcdb95d11301d97  member  macos-x86_64/libcurl-impersonate.dylib
 09247a144471f85540185a177c5b2ba630ee25d5e5acf283c13dbbf6da865cef  asset  curl-impersonate-v2.1.1.arm64-macos.tar.gz
 a6a679655b888393eb7e9edaeda7507f5a43eef1f87c6d2660d6826dcf17cb89  member  macos-aarch64/curl-impersonate
 a6a679655b888393eb7e9edaeda7507f5a43eef1f87c6d2660d6826dcf17cb89  reproduced=yes  macos-aarch64/curl-impersonate

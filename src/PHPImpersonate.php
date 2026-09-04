@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace Raza\PHPImpersonate;
 
-use RuntimeException;
 use Raza\PHPImpersonate\Browser\Browser;
 use Raza\PHPImpersonate\Ffi\LibResolver;
 use Raza\PHPImpersonate\Ffi\CurlImpersonate;
@@ -105,6 +104,19 @@ class PHPImpersonate implements ClientInterface
     private const MAX_FFI_ENGINES = 16;
 
     /**
+     * The process that owns {@see $ffiEngines}.
+     *
+     * After pcntl_fork() the child inherits the cache, and with it every
+     * handle's kept-alive connection — one kernel socket now shared by two
+     * processes. Two TLS record layers on one socket diverge after the first
+     * write, and on plain HTTP one process can read the other's response. The
+     * child must therefore not use the parent's engines, nor free them: a
+     * curl_easy_cleanup() there sends close_notify / FIN on the PARENT's
+     * connection. A pid mismatch makes the cache abandon them instead.
+     */
+    private static int $ffiEnginesPid = 0;
+
+    /**
      * @param BrowserName|BrowserInterface $browser Browser to use (name or browser instance).
      *                                               The full list is
      *                                               {@see \Raza\PHPImpersonate\Browser\BrowserName::getAll()};
@@ -116,8 +128,8 @@ class PHPImpersonate implements ClientInterface
      * @param array<string,mixed> $curlOptions Custom curl options (e.g. 'proxy')
      * @param self::ENGINE_* $engine Which engine to use; 'auto' (default) picks the
      *                               fast FFI engine when usable, else the executable.
-     * @throws RequestException If the browser is invalid or the requested engine is unavailable
-     * @throws InvalidArgumentException If the timeout, an option, or the engine name is invalid
+     * @throws RequestException If the requested engine is unavailable or no curl-impersonate binary can be found
+     * @throws InvalidArgumentException If the browser name, the timeout, an option, or the engine name is invalid
      */
     public function __construct(
         string|BrowserInterface $browser = self::DEFAULT_BROWSER,
@@ -480,6 +492,8 @@ class PHPImpersonate implements ClientInterface
 
         $key = $lib . "\0" . $this->browserName;
 
+        self::abandonEnginesOfAnotherProcess();
+
         if (isset(self::$ffiEngines[$key])) {
             // LRU touch: re-append so the least recently used entry evicts first.
             $engine = self::$ffiEngines[$key];
@@ -533,7 +547,33 @@ class PHPImpersonate implements ClientInterface
      */
     public static function closeFfiEngines(): void
     {
+        // Also reached from the shutdown hook, which a forked child inherits:
+        // its exit must not close the parent's connections.
+        self::abandonEnginesOfAnotherProcess();
+
         self::$ffiEngines = [];
+    }
+
+    /**
+     * Drop engines inherited across a fork without freeing their handles; see
+     * {@see $ffiEnginesPid}. A no-op in the process that created them.
+     */
+    private static function abandonEnginesOfAnotherProcess(): void
+    {
+        $pid = getmypid();
+        if ($pid === false) {
+            return;
+        }
+
+        if (self::$ffiEnginesPid !== $pid) {
+            if (self::$ffiEnginesPid !== 0) {
+                foreach (self::$ffiEngines as $engine) {
+                    $engine->abandon();
+                }
+                self::$ffiEngines = [];
+            }
+            self::$ffiEnginesPid = $pid;
+        }
     }
 
     /**
@@ -636,8 +676,16 @@ class PHPImpersonate implements ClientInterface
         // caller as what it is. It used to arrive as "Invalid browser: curl-
         // impersonate binary not found…", which sent people checking a name
         // that was fine.
+        //
+        // A caller mistake, so InvalidArgumentException — the type the README
+        // and the exception's own docblock promise for "an unknown browser",
+        // and what BrowserConfig::getConfig() already throws. It arrived as
+        // RequestException here, as a bare \RuntimeException from
+        // `new Browser()`, and as InvalidArgumentException from BrowserConfig:
+        // three types for one mistake, one of them outside the library's
+        // catch-all marker.
         if (! BrowserConfig::hasConfig($browser)) {
-            throw new RequestException(sprintf(
+            throw new InvalidArgumentException(sprintf(
                 "Invalid browser: '%s' is not a supported browser. Available: %s",
                 $browser,
                 implode(', ', BrowserConfig::getAvailableBrowsers())
@@ -645,11 +693,9 @@ class PHPImpersonate implements ClientInterface
         }
 
         if ($this->engine === self::ENGINE_PROCESS) {
-            try {
-                $this->browser = new Browser($browser);
-            } catch (RuntimeException $e) {
-                throw new RequestException($e->getMessage(), 0, $e);
-            }
+            // Browser throws the library's own types (InvalidArgumentException
+            // for the name, RequestException for a binary it cannot find).
+            $this->browser = new Browser($browser);
         }
     }
 

@@ -63,7 +63,7 @@ class PlatformDetector
     }
 
     /**
-     * Memoised result of {@see getLibcType()}; the probe shells out to `ldd`.
+     * Memoised result of {@see getLibcType()}; the last-resort probe shells out to `ldd`.
      */
     private static ?string $libcType = null;
 
@@ -85,17 +85,34 @@ class PlatformDetector
             return self::LIBC_GNU; // Not applicable for non-Linux
         }
 
-        // Method 1: Check if /etc/alpine-release exists (Alpine uses musl)
+        // Method 1: what THIS process is actually linked against. The question
+        // is which libc the running php binary uses — that decides whether a
+        // musl or a glibc build of libcurl-impersonate can be loaded into it —
+        // and the process's own memory map answers it exactly. The filesystem
+        // probes below answer a different question ("is a musl loader
+        // installed?"), and on a Debian or Ubuntu host with the `musl` package
+        // (pulled in by musl-tools, common on CI images that build static Go
+        // or Rust binaries) they said musl for a glibc PHP, which then tried
+        // to dlopen a musl shared object into a glibc process.
+        $maps = @file_get_contents('/proc/self/maps');
+        if (is_string($maps)) {
+            $fromMaps = self::libcFromMaps($maps);
+            if ($fromMaps !== null) {
+                return $fromMaps;
+            }
+        }
+
+        // Method 2: Check if /etc/alpine-release exists (Alpine uses musl)
         if (file_exists('/etc/alpine-release')) {
             return self::LIBC_MUSL;
         }
 
-        // Method 2: the dynamic loader itself, which needs no subprocess. This
+        // Method 3: the dynamic loader itself, which needs no subprocess. This
         // runs once per PHP process — and under PHP-FPM that is once per web
         // request, where the `ldd` probe below cost a shell plus a process on
         // every request that reached this library, for both engines. The
-        // loader path is the definitive answer on every mainstream distro, so
-        // `ldd` is only a last resort for an unfamiliar layout.
+        // loader path is the usual answer on a mainstream distro, so `ldd` is
+        // only a last resort for an unfamiliar layout.
         foreach (['/lib/ld-musl-x86_64.so.1', '/lib/ld-musl-aarch64.so.1'] as $muslLoader) {
             if (file_exists($muslLoader)) {
                 return self::LIBC_MUSL;
@@ -107,7 +124,7 @@ class PlatformDetector
             }
         }
 
-        // Method 3: Check ldd --version output.
+        // Method 4: Check ldd --version output.
         // shell_exec() returns string|false|null — false when the process could
         // not be spawned at all. The null check alone let `false` through to
         // stripos(), where it silently coerced to '' and every probe below
@@ -131,6 +148,27 @@ class PlatformDetector
 
         // Default to GNU libc
         return self::LIBC_GNU;
+    }
+
+    /**
+     * The libc named by a process's memory map (`/proc/<pid>/maps`), or null
+     * when none is mapped — a statically linked php, or a map from elsewhere.
+     *
+     * musl's loader and libc are one file, `ld-musl-<arch>.so.1`, usually
+     * mapped through the `/lib/libc.musl-<arch>.so.1` symlink; glibc maps
+     * `libc.so.6` and its `ld-linux-*` loader.
+     */
+    private static function libcFromMaps(string $maps): ?string
+    {
+        if (preg_match('#/(ld-musl-[^/\s]*\.so\.1|libc\.musl-[^/\s]*\.so\.1)$#m', $maps) === 1) {
+            return self::LIBC_MUSL;
+        }
+
+        if (preg_match('#/(libc\.so\.6|ld-linux[^/\s]*\.so\.[0-9]+)$#m', $maps) === 1) {
+            return self::LIBC_GNU;
+        }
+
+        return null;
     }
 
     /**

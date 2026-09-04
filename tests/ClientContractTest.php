@@ -7,6 +7,7 @@ namespace Raza\PHPImpersonate\Tests;
 use PHPUnit\Framework\TestCase;
 use Raza\PHPImpersonate\Request;
 use Raza\PHPImpersonate\PHPImpersonate;
+use Raza\PHPImpersonate\Browser\Browser;
 use Raza\PHPImpersonate\Browser\BrowserConfig;
 use Raza\PHPImpersonate\Support\RequestPreparer;
 use Raza\PHPImpersonate\Browser\BrowserInterface;
@@ -84,18 +85,35 @@ class ClientContractTest extends TestCase
     }
 
     /**
-     * The exception TYPE at the public boundary is the contract: the constructor
-     * documents RequestException, and both paths wrap what they catch —
-     * Browser's RuntimeException on the process path, BrowserConfig's
-     * InvalidArgumentException on the FFI/auto path.
+     * The exception TYPE at the public boundary is the contract: an unknown
+     * name is a caller mistake, so it is InvalidArgumentException on every
+     * path — the type the README documents for it. It used to be three
+     * types for one mistake: RequestException here, a bare \RuntimeException
+     * from `new Browser()`, InvalidArgumentException from BrowserConfig.
      */
     #[\PHPUnit\Framework\Attributes\DataProvider('engineProvider')]
-    public function testAnUnknownBrowserNameIsReportedAsARequestException(string $engine): void
+    public function testAnUnknownBrowserNameIsAnInvalidArgumentOnEveryEngine(string $engine): void
     {
-        $this->expectException(RequestException::class);
+        $this->expectException(InvalidArgumentException::class);
         $this->expectExceptionMessage('Invalid browser');
 
         new PHPImpersonate('definitely-not-a-browser', 30, [], $engine);
+    }
+
+    /**
+     * The Browser class is public and constructible on its own, so it must
+     * speak the library's types too: catching PHPImpersonateException has to
+     * cover `new Browser('typo')`.
+     */
+    public function testBrowserItselfRejectsAnUnknownNameWithTheLibrarysType(): void
+    {
+        try {
+            new Browser('definitely-not-a-browser');
+            $this->fail('expected an exception');
+        } catch (PHPImpersonateException $e) {
+            $this->assertInstanceOf(InvalidArgumentException::class, $e);
+            $this->assertStringContainsString('not supported', $e->getMessage());
+        }
     }
 
     // -------------------------------------------------------------------------

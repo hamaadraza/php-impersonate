@@ -305,6 +305,21 @@ final class CurlImpersonate
         };
     }
 
+    /**
+     * Forget the curl handle WITHOUT freeing it.
+     *
+     * For a process that inherited this engine across pcntl_fork(): the
+     * handle's connections are the parent's sockets, and curl_easy_cleanup()
+     * here would send close_notify / FIN on them. Leaking one easy handle in
+     * the child is the lesser harm. The engine is unusable afterwards.
+     *
+     * @internal Called by PHPImpersonate's engine cache; not part of the public API.
+     */
+    public function abandon(): void
+    {
+        $this->handle = null;
+    }
+
     public function __destruct()
     {
         if ($this->handle === null) {

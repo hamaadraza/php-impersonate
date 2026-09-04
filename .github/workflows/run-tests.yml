@@ -17,7 +17,12 @@ on:
     branches: [main]
     paths: &test-paths
       - '**.php'
-      - '.github/workflows/run-tests.yml'
+      # Every workflow, not just this one: dependabot-auto-merge.yml merges an
+      # actions bump once the required checks pass, and a bump to any OTHER
+      # workflow file matched nothing here — so the Tests check either never
+      # reported (PR stuck) or, without branch protection, the PR merged with
+      # no run at all.
+      - '.github/workflows/**'
       - 'phpunit.xml.dist'
       - 'phpstan.neon.dist'
       - 'composer.json'

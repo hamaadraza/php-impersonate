@@ -197,7 +197,7 @@ jobs:
       # The Windows image has Go on PATH; the macOS ARM64 image does not.
       - name: Set up Go (macOS/Windows)
         if: runner.os != 'Linux'
-        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version: stable
           cache: false
